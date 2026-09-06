@@ -114,7 +114,8 @@ export default function GuruPenilaian() {
         const mapSiswa: Record<string, any> = {};
         jawabanData.forEach(j => {
           if (!mapSiswa[j.siswa_id]) {
-            mapSiswa[j.siswa_id] = { id: j.siswa_id, nama: j.users?.nama, total_ai: 0, count: 0, status: j.status, id_jawaban: [], has_pending: false, details: [] };
+            const namaSiswa = Array.isArray(j.users) ? (j.users[0] as any)?.nama : (j.users as any)?.nama;
+            mapSiswa[j.siswa_id] = { id: j.siswa_id, nama: namaSiswa || 'Siswa', total_ai: 0, count: 0, status: j.status, id_jawaban: [], has_pending: false, details: [] };
           }
           mapSiswa[j.siswa_id].total_ai += Number(j.skor_ai || 0);
           mapSiswa[j.siswa_id].count += 1;
