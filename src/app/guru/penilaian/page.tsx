@@ -73,7 +73,7 @@ export default function GuruPenilaian() {
     if (idsToFilter.length > 0) {
       const { data: jawabanData, error: errJawaban } = await supabase
         .from('jawaban_siswa')
-        .select('id, siswa_id, skor_ai, skor_final, status, jawaban, soal_id, users!inner(nama)')
+        .select('id, siswa_id, skor_ai, skor_final, status, jawaban, soal_id')
         .in('soal_id', idsToFilter);
         
       if (errJawaban) {
@@ -110,12 +110,17 @@ export default function GuruPenilaian() {
       }
         
       if (jawabanData) {
+        // Fetch user names separately to avoid TS inference issues
+        const uniqueSiswaIds = [...new Set(jawabanData.map(j => j.siswa_id))];
+        const { data: usersData } = await supabase.from('users').select('id, nama').in('id', uniqueSiswaIds);
+        const mapNama: Record<string, string> = {};
+        usersData?.forEach(u => { mapNama[u.id] = u.nama; });
+
         // Gabungkan nilai berdasarkan siswa
         const mapSiswa: Record<string, any> = {};
         jawabanData.forEach(j => {
           if (!mapSiswa[j.siswa_id]) {
-            const namaSiswa = Array.isArray(j.users) ? (j.users[0] as any)?.nama : (j.users as any)?.nama;
-            mapSiswa[j.siswa_id] = { id: j.siswa_id, nama: namaSiswa || 'Siswa', total_ai: 0, count: 0, status: j.status, id_jawaban: [], has_pending: false, details: [] };
+            mapSiswa[j.siswa_id] = { id: j.siswa_id, nama: mapNama[j.siswa_id] || 'Siswa', total_ai: 0, count: 0, status: j.status, id_jawaban: [], has_pending: false, details: [] };
           }
           mapSiswa[j.siswa_id].total_ai += Number(j.skor_ai || 0);
           mapSiswa[j.siswa_id].count += 1;
