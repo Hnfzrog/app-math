@@ -121,3 +121,9 @@ $$ language plpgsql security definer;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Tambahan untuk profil siswa
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS nisn varchar(20);
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS tanggal_lahir date;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS jenis_kelamin varchar(10) check (jenis_kelamin in ('Laki-laki', 'Perempuan'));
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS nomor_hp varchar(20);

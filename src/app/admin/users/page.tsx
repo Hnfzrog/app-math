@@ -7,6 +7,7 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [nama, setNama] = useState('');
+  const [nisn, setNisn] = useState('');
   const [role, setRole] = useState('guru');
   const [email, setEmail] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -62,6 +63,7 @@ export default function AdminUsers() {
   const handleEdit = async (user: any) => {
     setEditingId(user.id);
     setNama(user.nama);
+    setNisn(user.nisn || '');
     setEmail(user.email || '');
     setRole(user.role);
     
@@ -87,6 +89,7 @@ export default function AdminUsers() {
         // Edit User
         const { error } = await supabase.from('users').update({
           nama,
+          nisn: role === 'siswa' ? nisn : null,
           email,
           role
         }).eq('id', editingId);
@@ -99,6 +102,7 @@ export default function AdminUsers() {
         const { error } = await supabase.from('users').insert({
           id: fakeUuid,
           nama,
+          nisn: role === 'siswa' ? nisn : null,
           email,
           role
         });
@@ -125,6 +129,7 @@ export default function AdminUsers() {
       
       setShowModal(false);
       setNama('');
+      setNisn('');
       setEmail('');
       setRole('guru');
       setEditingId(null);
@@ -142,6 +147,7 @@ export default function AdminUsers() {
   const bukaModalBaru = () => {
     setEditingId(null);
     setNama('');
+    setNisn('');
     setEmail('');
     setRole('guru');
     setSelectedClasses([]);
@@ -221,6 +227,19 @@ export default function AdminUsers() {
                     required
                   />
                 </div>
+
+                {role === 'siswa' && (
+                  <div className="form-group">
+                    <label>NISN</label>
+                    <input 
+                      type="text" 
+                      className="form-control"
+                      value={nisn} 
+                      onChange={(e) => setNisn(e.target.value)}
+                      placeholder="Masukkan NISN Siswa"
+                    />
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label>Email (Otomatis)</label>

@@ -39,6 +39,8 @@ export default function LmsLayout({ children, role, userName = "Pengguna", pageT
     } else {
       return [
         { name: 'Dashboard', href: '/siswa/dashboard', icon: '📊' },
+        { name: 'Kelas Saya', href: '/siswa/kelas', icon: '🏫' },
+        { name: 'Profil Saya', href: '/siswa/profile', icon: '👤' },
         { name: 'Materi Belajar', href: '/siswa/materi', icon: '📚' },
         { name: 'Tugas & Kuis', href: '/siswa/tugas', icon: '📝' },
         { name: 'Nilai Saya', href: '/siswa/nilai', icon: '🏆' },
