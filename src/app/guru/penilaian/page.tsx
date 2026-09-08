@@ -30,7 +30,7 @@ export default function GuruPenilaian() {
       .eq('guru_id', userId);
     
     if (data && data.length > 0) {
-      const classes = data.map(d => d.kelas);
+      const classes = data.map(d => d.kelas as any);
       // Sort classes by name
       classes.sort((a: any, b: any) => a.nama.localeCompare(b.nama));
       setAssignedClasses(classes);
