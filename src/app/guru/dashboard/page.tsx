@@ -2,28 +2,32 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function GuruDashboard() {
   const [totalKelas, setTotalKelas] = useState(0);
   const [tugasBelumDinilai, setTugasBelumDinilai] = useState(0);
 
+  const { userId, loading: userLoading } = useCurrentUser();
+
   useEffect(() => {
-    fetchStats();
-  }, []);
+    if (userId) fetchStats();
+  }, [userId]);
 
   const fetchStats = async () => {
-    // Hardcoded ID Guru Budi untuk MVP
-    const GURU_ID = 'f0000000-0000-0000-0000-000000000001';
+    if (!userId) return;
 
     const { count: kelasCount } = await supabase
       .from('guru_kelas')
       .select('*', { count: 'exact', head: true })
-      .eq('guru_id', GURU_ID);
+      .eq('guru_id', userId);
     setTotalKelas(kelasCount || 0);
 
     const { count: pendingCount } = await supabase.from('jawaban_siswa').select('*', { count: 'exact', head: true }).eq('status', 'pending_verifikasi');
     setTugasBelumDinilai(pendingCount || 0);
   };
+
+  if (userLoading) return <div className="p-4 text-center">Loading...</div>;
 
   return (
     <div>

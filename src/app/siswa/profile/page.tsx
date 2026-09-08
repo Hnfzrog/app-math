@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaProfile() {
   const [loading, setLoading] = useState(true);
@@ -16,14 +17,14 @@ export default function SiswaProfile() {
     nomor_hp: ''
   });
 
-  // Hardcoded ID Siswa Andi untuk MVP
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001';
+  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
-    fetchProfile();
-  }, []);
+    if (SISWA_ID) fetchProfile();
+  }, [SISWA_ID]);
 
   const fetchProfile = async () => {
+    if (!SISWA_ID) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('users')
@@ -73,6 +74,8 @@ export default function SiswaProfile() {
   };
 
   if (loading) return <div className="text-center mt-4">Memuat profil...</div>;
+
+  if (userLoading) return <div className="p-4 text-center">Loading...</div>;
 
   return (
     <div className="card card-body" style={{ maxWidth: '600px', margin: '0 auto' }}>

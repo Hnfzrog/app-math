@@ -1,13 +1,16 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
 
 export default function AdminMasterKelas() {
   const [kelasList, setKelasList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [namaKelas, setNamaKelas] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [angkatan, setAngkatan] = useState('7');
+  const [subKelas, setSubKelas] = useState('');
 
   useEffect(() => {
     fetchKelas();
@@ -25,55 +28,70 @@ export default function AdminMasterKelas() {
 
   const handleEdit = (kelas: any) => {
     setEditingId(kelas.id);
-    setNamaKelas(kelas.nama);
+    setAngkatan(kelas.angkatan || '7');
+    setSubKelas(kelas.sub_kelas || '');
     setShowModal(true);
-  };
-
-  const hapusKelas = async (id: string) => {
-    if (confirm('Yakin ingin menghapus kelas ini? Peringatan: Menghapus kelas mungkin akan error jika ada data guru/siswa yang terhubung (Foreign Key Constraint).')) {
-      const { error } = await supabase.from('kelas').delete().eq('id', id);
-      if (error) {
-        alert('Gagal menghapus kelas: ' + error.message);
-      } else {
-        fetchKelas();
-      }
-    }
-  };
-
-  const handleSimpanKelas = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (namaKelas.trim() === '') return;
-
-    if (editingId) {
-      // Edit
-      const { error } = await supabase.from('kelas').update({ nama: namaKelas }).eq('id', editingId);
-      if (error) alert('Gagal update kelas: ' + error.message);
-    } else {
-      // Create new (generate mock UUID for id)
-      const fakeUuid = 'c' + Date.now() + '-1111-1111-1111-111111111111';
-      const { error } = await supabase.from('kelas').insert({ id: fakeUuid, nama: namaKelas });
-      if (error) alert('Gagal tambah kelas: ' + error.message);
-    }
-
-    setShowModal(false);
-    setNamaKelas('');
-    setEditingId(null);
-    fetchKelas();
   };
 
   const bukaModalBaru = () => {
     setEditingId(null);
-    setNamaKelas('');
+    setAngkatan('7');
+    setSubKelas('');
     setShowModal(true);
   };
 
+  const hapusKelas = async (id: string) => {
+    setConfirmDeleteId(id);
+  };
+
+  const executeDeleteKelas = async () => {
+    if (!confirmDeleteId) return;
+    const { error } = await supabase.from('kelas').delete().eq('id', confirmDeleteId);
+    if (error) {
+      customAlert('Gagal menghapus kelas: ' + error.message, true);
+    } else {
+      fetchKelas();
+    }
+    setConfirmDeleteId(null);
+  };
+
+  const handleSimpanKelas = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalSubKelas = subKelas.trim() === '' ? null : subKelas.trim();
+    const computedNama = `${angkatan}${finalSubKelas || ''}`;
+
+    if (editingId) {
+      // Edit
+      const { error } = await supabase.from('kelas').update({ 
+        nama: computedNama, 
+        angkatan, 
+        sub_kelas: finalSubKelas 
+      }).eq('id', editingId);
+      if (error) customAlert('Gagal update kelas: ' + error.message, true);
+    } else {
+      // Create new (database will generate UUID)
+      const { error } = await supabase.from('kelas').insert({ 
+        nama: computedNama, 
+        angkatan, 
+        sub_kelas: finalSubKelas 
+      });
+      if (error) customAlert('Gagal tambah kelas: ' + error.message, true);
+    }
+
+    setShowModal(false);
+    setAngkatan('7');
+    setSubKelas('');
+    setEditingId(null);
+    fetchKelas();
+  };
+
+
   return (
     <div className="card card-body">
-      <div className="table-controls">
+      <div className="d-flex justify-between align-center mb-4">
         <h3>Master Data Kelas</h3>
         <button className="btn btn-primary" onClick={bukaModalBaru}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 
-          Tambah Kelas Baru
+          + Tambah Kelas
         </button>
       </div>
 
@@ -95,7 +113,9 @@ export default function AdminMasterKelas() {
               {kelasList.map(kelas => (
                 <tr key={kelas.id}>
                   <td><span className="text-muted text-sm">{kelas.id.substring(0, 8)}...</span></td>
-                  <td><strong>{kelas.nama}</strong></td>
+                  <td>
+                    <strong>Kelas {kelas.angkatan}{kelas.sub_kelas || ''}</strong>
+                  </td>
                   <td>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button onClick={() => handleEdit(kelas)} className="btn btn-sm btn-outline">Edit</button>
@@ -119,17 +139,31 @@ export default function AdminMasterKelas() {
             <div className="modal-body">
               <form onSubmit={handleSimpanKelas}>
                 <div className="form-group">
-                  <label>Nama Kelas</label>
+                  <label>Angkatan</label>
+                  <select 
+                    className="form-control"
+                    value={angkatan} 
+                    onChange={(e) => setAngkatan(e.target.value)} 
+                    required
+                  >
+                    <option value="7">Kelas 7</option>
+                    <option value="8">Kelas 8</option>
+                    <option value="9">Kelas 9</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Sub-kelas (Opsional)</label>
                   <input 
                     type="text" 
                     className="form-control"
-                    value={namaKelas} 
-                    onChange={(e) => setNamaKelas(e.target.value)} 
-                    placeholder="Contoh: 7 (saat ini hanya menerima 7, 8, atau 9)"
-                    required
+                    value={subKelas} 
+                    onChange={(e) => setSubKelas(e.target.value)} 
+                    placeholder="Contoh: A, B, C"
                   />
-                  <small className="text-muted mt-1" style={{ display: 'block' }}>
-                    *Info: Default database mungkin hanya menerima input '7', '8', atau '9'. Hubungi tim teknis (jalankan SQL DROP CONSTRAINT) jika ingin nama bebas.
+                </div>
+                <div className="mb-3">
+                  <small className="text-muted">
+                    Preview Nama Kelas: <strong>{angkatan}{subKelas}</strong>
                   </small>
                 </div>
                 <div className="d-flex justify-between mt-4">
@@ -137,6 +171,25 @@ export default function AdminMasterKelas() {
                   <button type="submit" className="btn btn-primary">Simpan Kelas</button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteId && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 style={{ color: 'var(--danger, #dc3545)' }}>Konfirmasi Hapus</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setConfirmDeleteId(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p>Yakin ingin menghapus kelas ini? Peringatan: Menghapus kelas akan menghapus semua data guru dan siswa yang terhubung.</p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-outline" onClick={() => setConfirmDeleteId(null)}>Batal</button>
+                <button className="btn btn-danger" onClick={executeDeleteKelas}>Ya, Hapus</button>
+              </div>
             </div>
           </div>
         </div>

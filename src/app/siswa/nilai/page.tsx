@@ -1,15 +1,18 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaNilai() {
   const [loading, setLoading] = useState(true);
   const [dataNilai, setDataNilai] = useState<any[]>([]);
   
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001'; // Mock ID
+  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
-    fetchNilai();
+    if (SISWA_ID) fetchNilai();
+
+    if (!SISWA_ID) return;
 
     // Listen to updates from Guru
     const channel = supabase.channel('siswa-nilai-changes')
@@ -21,9 +24,10 @@ export default function SiswaNilai() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [SISWA_ID]);
 
   const fetchNilai = async () => {
+    if (!SISWA_ID) return;
     setLoading(true);
     try {
       // 1. Ambil semua jawaban siswa ini
@@ -64,16 +68,23 @@ export default function SiswaNilai() {
         let totalSkor = 0;
         let isDinilaiGuru = true;
         
-        jawabanUntukKonten.forEach(j => {
-          if (j.skor_final !== null && j.skor_final !== undefined) {
-            totalSkor += j.skor_final;
+        if (jawabanUntukKonten.length > 0) {
+          const firstJ = jawabanUntukKonten[0];
+          // Jika sudah dinilai, ambil skor_final (karena sama untuk semua soal di satu modul)
+          if (firstJ.skor_final !== null && firstJ.skor_final !== undefined) {
+            totalSkor = firstJ.skor_final;
           } else {
-            totalSkor += (j.skor_ai || 0);
-            if (j.status !== 'final') {
-              isDinilaiGuru = false;
-            }
+            // Jika belum dinilai, hitung rata-rata skor AI
+            let sumAi = 0;
+            jawabanUntukKonten.forEach(j => {
+              sumAi += (j.skor_ai || 0);
+              if (j.status !== 'final') {
+                isDinilaiGuru = false;
+              }
+            });
+            totalSkor = Math.round(sumAi / jawabanUntukKonten.length);
           }
-        });
+        }
         
         hasilAkhir.push({
           id: konten.id,
@@ -93,7 +104,7 @@ export default function SiswaNilai() {
     }
   };
 
-  if (loading) return <div className="text-center mt-4">Loading data nilai...</div>;
+  if (loading || userLoading) return <div className="text-center mt-4">Loading data nilai...</div>;
 
   return (
     <div>

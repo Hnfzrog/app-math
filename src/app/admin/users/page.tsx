@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<any[]>([]);
@@ -10,7 +11,9 @@ export default function AdminUsers() {
   const [nisn, setNisn] = useState('');
   const [role, setRole] = useState('guru');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   
   const [allClasses, setAllClasses] = useState<any[]>([]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
@@ -54,11 +57,30 @@ export default function AdminUsers() {
   };
 
   const hapusUser = async (id: string) => {
-    if (confirm('Yakin ingin menghapus user ini?')) {
-      await supabase.from('users').delete().eq('id', id);
-      fetchUsers();
-    }
+    setConfirmDeleteId(id);
   };
+
+  const executeDelete = async () => {
+    if (!confirmDeleteId) return;
+    try {
+      const res = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: confirmDeleteId }),
+      });
+      const json = await res.json();
+      
+      if (!res.ok) {
+        customAlert('Gagal menghapus user: ' + (json.error || 'Unknown error'), true);
+      } else {
+        fetchUsers();
+      }
+    } catch (err: any) {
+      customAlert('Terjadi kesalahan: ' + err.message, true);
+    }
+    setConfirmDeleteId(null);
+  };
+
 
   const handleEdit = async (user: any) => {
     setEditingId(user.id);
@@ -77,6 +99,7 @@ export default function AdminUsers() {
       if (data) userClasses = data.map(d => d.kelas_id);
     }
     setSelectedClasses(userClasses);
+    setPassword('');
     setShowModal(true);
   };
 
@@ -86,7 +109,7 @@ export default function AdminUsers() {
       let targetUserId = editingId;
       
       if (editingId) {
-        // Edit User
+        // Edit User — update profil
         const { error } = await supabase.from('users').update({
           nama,
           nisn: role === 'siswa' ? nisn : null,
@@ -94,19 +117,31 @@ export default function AdminUsers() {
           role
         }).eq('id', editingId);
         
-        if (error) alert('Gagal update user: ' + error.message);
+        if (error) { customAlert('Gagal update user: ' + error.message, true); return; }
+
+        // Ganti password jika diisi
+        if (password) {
+          const res = await fetch('/api/admin/update-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: editingId, password }),
+          });
+          const json = await res.json();
+          if (!res.ok) { customAlert('Gagal ganti password: ' + json.error, true); return; }
+        }
       } else {
-        // Dummy Insert
-        const fakeUuid = 'f' + Date.now() + '-1111-1111-1111-111111111111';
-        targetUserId = fakeUuid;
-        const { error } = await supabase.from('users').insert({
-          id: fakeUuid,
-          nama,
-          nisn: role === 'siswa' ? nisn : null,
-          email,
-          role
+        // Buat user via server-side API Route (pakai auth.admin untuk penuhi FK constraint)
+        const res = await fetch('/api/admin/create-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nama, email, password, role, nisn }),
         });
-        if (error) alert('Gagal tambah user: ' + error.message);
+        const json = await res.json();
+        if (!res.ok) {
+          customAlert('Gagal tambah user: ' + json.error, true);
+          return;
+        }
+        targetUserId = json.id;
       }
       
       // Update Kelas Assignment
@@ -150,6 +185,7 @@ export default function AdminUsers() {
     setNisn('');
     setEmail('');
     setRole('guru');
+    setPassword('');
     setSelectedClasses([]);
     setShowModal(true);
   };
@@ -219,10 +255,7 @@ export default function AdminUsers() {
                     type="text" 
                     className="form-control"
                     value={nama} 
-                    onChange={(e) => {
-                      setNama(e.target.value);
-                      setEmail(`${e.target.value.toLowerCase().replace(/\s+/g, '')}@eduschool.test`);
-                    }} 
+                    onChange={(e) => setNama(e.target.value)} 
                     placeholder="Contoh: Budi Santoso"
                     required
                   />
@@ -249,6 +282,21 @@ export default function AdminUsers() {
                     value={email} 
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    Password{editingId && <span style={{ fontWeight: 'normal', color: 'var(--text-muted, #888)', marginLeft: '6px', fontSize: '0.85em' }}>(kosongkan jika tidak diganti)</span>}
+                  </label>
+                  <input 
+                    type="password" 
+                    className="form-control"
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={editingId ? 'Isi untuk ganti password' : 'Minimal 6 karakter'}
+                    minLength={password.length > 0 ? 6 : undefined}
+                    required={!editingId}
                   />
                 </div>
                 
@@ -293,6 +341,25 @@ export default function AdminUsers() {
                   <button type="submit" className="btn btn-primary">Simpan User</button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteId && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 style={{ color: 'var(--danger, #dc3545)' }}>Konfirmasi Hapus</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setConfirmDeleteId(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p>Apakah kamu yakin ingin menghapus pengguna ini? Tindakan ini tidak bisa dibatalkan dan semua data terkait (termasuk nilai) akan ikut terhapus.</p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-outline" onClick={() => setConfirmDeleteId(null)}>Batal</button>
+                <button className="btn btn-danger" onClick={executeDelete}>Ya, Hapus</button>
+              </div>
             </div>
           </div>
         </div>

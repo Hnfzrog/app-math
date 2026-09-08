@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 import styles from './page.module.css';
 
 export default function LoginPage() {
@@ -16,23 +17,39 @@ export default function LoginPage() {
     setLoading(true);
     setErrorMsg('');
 
-    // In a real implementation with Supabase Auth:
-    // const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    // For MVP simulation without backend fully hooked to UI yet:
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
+      email, 
+      password 
+    });
+
+    if (authError || !authData.session) {
+      setErrorMsg('Email atau password salah!');
+      setLoading(false);
+      return;
+    }
+
+    // Ambil role dari tabel public.users
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', authData.session.user.id)
+      .single();
+
+    if (userError || !userData) {
+      setErrorMsg('Gagal mengambil data profil.');
+      setLoading(false);
+      return;
+    }
+
+    document.cookie = `user-role=${userData.role}; path=/`;
     
-    setTimeout(() => {
-      // Dummy logic
-      if (email.includes('admin')) {
-        document.cookie = "user-role=admin; path=/";
-        router.push('/admin/dashboard');
-      } else if (email.includes('guru')) {
-        document.cookie = "user-role=guru; path=/";
-        router.push('/guru/dashboard');
-      } else {
-        document.cookie = "user-role=siswa; path=/";
-        router.push('/siswa/dashboard');
-      }
-    }, 1000);
+    if (userData.role === 'admin') {
+      router.push('/admin/dashboard');
+    } else if (userData.role === 'guru') {
+      router.push('/guru/dashboard');
+    } else {
+      router.push('/siswa/dashboard');
+    }
   };
 
   return (

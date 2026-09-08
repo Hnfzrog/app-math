@@ -1,6 +1,7 @@
 'use client';
 import { useState, use, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
 import Link from 'next/link';
 
 export default function GuruKelasDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -21,6 +22,12 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [formJudul, setFormJudul] = useState('');
   const [formLink, setFormLink] = useState('');
   const [editModeId, setEditModeId] = useState<string | null>(null);
+  const [confirmDeleteMateriId, setConfirmDeleteMateriId] = useState<string | null>(null);
+  const [confirmDeleteBabId, setConfirmDeleteBabId] = useState<string | null>(null);
+  const [confirmDeleteSoalIdx, setConfirmDeleteSoalIdx] = useState<number | null>(null);
+  
+  const [showAddBabModal, setShowAddBabModal] = useState(false);
+  const [newBabJudul, setNewBabJudul] = useState('');
   
   // State form kuis
   const [soalList, setSoalList] = useState<any[]>([]);
@@ -28,7 +35,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [pertanyaan, setPertanyaan] = useState('');
   const [kunciUraian, setKunciUraian] = useState('');
   const [opsiPG, setOpsiPG] = useState(['', '', '', '']);
-  const [kunciPG, setKunciPG] = useState(0);
+  const [kunciPG, setKunciPG] = useState<number[]>([0]);
 
   useEffect(() => {
     fetchDataKelas();
@@ -59,15 +66,21 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setLoading(false);
   };
 
-  const handleTambahBab = async () => {
-    const judulBab = prompt('Masukkan Judul Bab Baru (misal: Bab 2: Aljabar):');
-    if (judulBab && realKelasId) {
+  const handleTambahBab = () => {
+    setNewBabJudul('');
+    setShowAddBabModal(true);
+  };
+
+  const executeTambahBab = async (e: any) => {
+    e.preventDefault();
+    if (newBabJudul.trim() && realKelasId) {
       await supabase.from('bab').insert({
         kelas_id: realKelasId,
         nomor: babs.length + 1,
-        judul: judulBab
+        judul: newBabJudul.trim()
       });
       fetchDataKelas();
+      setShowAddBabModal(false);
     }
   };
 
@@ -102,26 +115,79 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   };
 
   const hapusMateri = async (idKonten: string) => {
-    if (confirm('Yakin ingin menghapus materi dari database?')) {
-      await supabase.from('konten').delete().eq('id', idKonten);
+    setConfirmDeleteMateriId(idKonten);
+  };
+
+  const executeHapusMateri = async () => {
+    if (!confirmDeleteMateriId) return;
+    await supabase.from('konten').delete().eq('id', confirmDeleteMateriId);
+    fetchDataKelas();
+    setConfirmDeleteMateriId(null);
+  };
+
+  const hapusBab = async (idBab: string) => {
+    setConfirmDeleteBabId(idBab);
+  };
+
+  const executeHapusBab = async () => {
+    if (!confirmDeleteBabId) return;
+    const { error } = await supabase.from('bab').delete().eq('id', confirmDeleteBabId);
+    if (error) {
+      customAlert('Gagal menghapus bab: ' + error.message, true);
+    } else {
       fetchDataKelas();
     }
+    setConfirmDeleteBabId(null);
+  };
+
+  const tambahOpsiPG = () => {
+    setOpsiPG([...opsiPG, '']);
+  };
+
+  const hapusOpsiPG = (index: number) => {
+    if (opsiPG.length <= 2) {
+      customAlert('Minimal harus ada 2 opsi pilihan ganda.', true);
+      return;
+    }
+    const newOpsi = opsiPG.filter((_, i) => i !== index);
+    setOpsiPG(newOpsi);
+    // Adjust kunciPG indexes after removal
+    const newKunci = kunciPG
+      .filter(k => k !== index)
+      .map(k => k > index ? k - 1 : k);
+    setKunciPG(newKunci.length > 0 ? newKunci : [0]);
+  };
+
+  const toggleKunciPG = (index: number) => {
+    setKunciPG(prev => 
+      prev.includes(index) 
+        ? prev.filter(k => k !== index)
+        : [...prev, index]
+    );
   };
 
   const hapusSoalSementara = (idx: number) => {
-    setSoalList(soalList.filter((_, i) => i !== idx));
+    setConfirmDeleteSoalIdx(idx);
+  };
+
+  const executeHapusSoal = () => {
+    if (confirmDeleteSoalIdx === null) return;
+    setSoalList(soalList.filter((_, i) => i !== confirmDeleteSoalIdx));
+    setConfirmDeleteSoalIdx(null);
   };
 
   const handleSimpanSoalSementara = () => {
+    const isMultiple = kunciPG.length > 1;
     const soalBaru = {
       tipe: tipeSoal,
-      pertanyaan: tipeSoal === 'pg' ? `${pertanyaan}|||${JSON.stringify(opsiPG)}` : pertanyaan,
-      kunci_jawaban: tipeSoal === 'pg' ? opsiPG[kunciPG] : kunciUraian
+      pertanyaan: tipeSoal === 'pg' ? `${pertanyaan}|||${JSON.stringify(opsiPG)}|||${isMultiple}` : pertanyaan,
+      kunci_jawaban: tipeSoal === 'pg' ? JSON.stringify(kunciPG.map(idx => opsiPG[idx])) : kunciUraian
     };
     setSoalList([...soalList, soalBaru]);
     setPertanyaan('');
     setKunciUraian('');
     setOpsiPG(['', '', '', '']);
+    setKunciPG([0]);
   };
 
   const insertSymbol = (symbol: string) => {
@@ -131,7 +197,9 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const isSoalValid = () => {
     if (!pertanyaan.trim()) return false;
     if (tipeSoal === 'pg') {
+      if (opsiPG.length < 2) return false;
       if (opsiPG.some(opt => !opt.trim())) return false;
+      if (kunciPG.length === 0) return false;
     } else {
       if (!kunciUraian.trim()) return false;
     }
@@ -159,9 +227,9 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     if (formTipe !== 'emateri' && soalList.length === 0) {
       // Cek apakah user sedang ngetik soal tapi lupa klik "Simpan Soal"
       if (pertanyaan.trim().length > 0) {
-        alert('Kamu belum menyimpan soal yang sedang diketik! Klik "Simpan Soal ke Daftar" terlebih dahulu.');
+        customAlert('Kamu belum menyimpan soal yang sedang diketik! Klik "Simpan Soal ke Daftar" terlebih dahulu.', true);
       } else {
-        alert('Modul evaluasi/kuis minimal harus punya 1 soal! Tambahkan soal ke daftar terlebih dahulu.');
+        customAlert('Modul evaluasi/kuis minimal harus punya 1 soal! Tambahkan soal ke daftar terlebih dahulu.', true);
       }
       return;
     }
@@ -177,7 +245,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       }).eq('id', editModeId);
 
       if (errKonten) {
-        alert('Gagal mengupdate konten!');
+        customAlert('Gagal mengupdate konten!', true);
         return;
       }
       
@@ -193,7 +261,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       }).select().single();
 
       if (errKonten || !newKonten) {
-        alert('Gagal menyimpan konten!');
+        customAlert('Gagal menyimpan konten!', true);
         return;
       }
       kontenIdToUse = newKonten.id;
@@ -219,7 +287,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       if (soalBaru.length > 0) {
         const { error: errInsert } = await supabase.from('soal').insert(soalBaru);
         if (errInsert) {
-          alert('Gagal menyimpan soal baru: ' + errInsert.message);
+          customAlert('Gagal menyimpan soal baru: ' + errInsert.message, true);
           return;
         }
       }
@@ -227,7 +295,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       if (soalLama.length > 0) {
         const { error: errUpdate } = await supabase.from('soal').upsert(soalLama);
         if (errUpdate) {
-          alert('Gagal mengupdate soal lama: ' + errUpdate.message);
+          customAlert('Gagal mengupdate soal lama: ' + errUpdate.message, true);
           return;
         }
       }
@@ -260,7 +328,10 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
               <span className="badge badge-info mr-2">{index + 1}</span>
               {bab.judul}
             </h3>
-            <button onClick={() => bukaModalTambah(bab.id)} className="btn btn-sm btn-outline">+ Tambah Modul/Kuis</button>
+            <div className="d-flex gap-2">
+              <button onClick={() => bukaModalTambah(bab.id)} className="btn btn-sm btn-outline">+ Tambah Modul/Kuis</button>
+              <button onClick={() => hapusBab(bab.id)} className="btn btn-sm btn-danger">Hapus Bab</button>
+            </div>
           </div>
           
           {(!materi[bab.id] || materi[bab.id].length === 0) ? (
@@ -350,12 +421,35 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
 
                     {tipeSoal === 'pg' ? (
                       <div className="form-group">
-                        <label>Opsi Pilihan Ganda (Pilih radio untuk kunci jawaban)</label>
+                        <label className="d-flex justify-between align-center mb-2">
+                          <span>Opsi Pilihan Ganda</span>
+                          <button type="button" className="btn btn-sm btn-outline" onClick={tambahOpsiPG}>+ Tambah Opsi</button>
+                        </label>
+                        <p className="text-sm text-muted mb-2">Pilih satu atau lebih jawaban yang benar menggunakan *checkbox*.</p>
                         <div className="d-flex flex-column gap-2 mt-2">
                           {opsiPG.map((opt, idx) => (
                             <div key={idx} className="d-flex gap-2 align-center">
-                              <input type="radio" name="kunci" checked={kunciPG === idx} onChange={() => setKunciPG(idx)} />
-                              <input type="text" className="form-control" value={opt} onChange={e => { const newOpts = [...opsiPG]; newOpts[idx] = e.target.value; setOpsiPG(newOpts); }} placeholder={`Opsi ${['A','B','C','D'][idx]}`} />
+                              <input 
+                                type="checkbox" 
+                                checked={kunciPG.includes(idx)} 
+                                onChange={() => toggleKunciPG(idx)} 
+                                title="Tandai sebagai jawaban benar"
+                                style={{ transform: 'scale(1.2)' }}
+                              />
+                              <input 
+                                type="text" 
+                                className="form-control" 
+                                value={opt} 
+                                onChange={e => { 
+                                  const newOpts = [...opsiPG]; 
+                                  newOpts[idx] = e.target.value; 
+                                  setOpsiPG(newOpts); 
+                                }} 
+                                placeholder={`Opsi ${idx + 1}`} 
+                              />
+                              {opsiPG.length > 2 && (
+                                <button type="button" className="btn btn-sm btn-danger" onClick={() => hapusOpsiPG(idx)}>Hapus</button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -375,6 +469,11 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                     >
                       Simpan Soal ke Daftar ({soalList.length} Soal)
                     </button>
+                    {!isSoalValid() && (
+                      <p className="text-danger text-sm text-center mt-2">
+                        *Tombol terkunci. Pastikan teks pertanyaan terisi, <strong>semua kotak opsi tidak ada yang kosong</strong> (hapus opsi jika berlebih), dan pilih minimal 1 kotak sebagai kunci jawaban.
+                      </p>
+                    )}
                     
                     {soalList.length > 0 && (
                       <div className="mt-3">
@@ -403,6 +502,93 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                   >
                     Simpan Modul ke Kelas
                   </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modals */}
+      {confirmDeleteMateriId && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 style={{ color: 'var(--danger, #dc3545)' }}>Konfirmasi Hapus</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setConfirmDeleteMateriId(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p>Yakin ingin menghapus materi dari database?</p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-outline" onClick={() => setConfirmDeleteMateriId(null)}>Batal</button>
+                <button className="btn btn-danger" onClick={executeHapusMateri}>Ya, Hapus</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteBabId && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 style={{ color: 'var(--danger, #dc3545)' }}>Konfirmasi Hapus</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setConfirmDeleteBabId(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p>Yakin ingin menghapus bab ini? SEMUA materi dan soal di dalamnya akan ikut terhapus permanen.</p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-outline" onClick={() => setConfirmDeleteBabId(null)}>Batal</button>
+                <button className="btn btn-danger" onClick={executeHapusBab}>Ya, Hapus</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteSoalIdx !== null && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-dialog" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 style={{ color: 'var(--danger, #dc3545)' }}>Konfirmasi Hapus</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setConfirmDeleteSoalIdx(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p>Yakin ingin menghapus soal ini dari daftar?</p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-outline" onClick={() => setConfirmDeleteSoalIdx(null)}>Batal</button>
+                <button className="btn btn-danger" onClick={executeHapusSoal}>Ya, Hapus</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Bab Modal */}
+      {showAddBabModal && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3>Tambah Bab Baru</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setShowAddBabModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={executeTambahBab}>
+                <div className="form-group">
+                  <label>Judul Bab</label>
+                  <input 
+                    type="text" 
+                    className="form-control"
+                    value={newBabJudul}
+                    onChange={(e) => setNewBabJudul(e.target.value)}
+                    placeholder="Contoh: Bab 2: Aljabar"
+                    autoFocus
+                    required
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn btn-outline" onClick={() => setShowAddBabModal(false)}>Batal</button>
+                  <button type="submit" className="btn btn-primary">Simpan Bab</button>
                 </div>
               </form>
             </div>

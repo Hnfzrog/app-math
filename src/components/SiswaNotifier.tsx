@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaNotifier() {
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001'; // Mock ID
+  const { userId: SISWA_ID } = useCurrentUser();
 
   const [permission, setPermission] = useState<NotificationPermission | 'unknown'>('unknown');
   const [toasts, setToasts] = useState<{id: number, title: string, body: string}[]>([]);

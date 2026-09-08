@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaDashboard() {
   const [loading, setLoading] = useState(true);
@@ -12,11 +13,12 @@ export default function SiswaDashboard() {
   const [lkpdCount, setLkpdCount] = useState(0);
   const [showToast, setShowToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false });
 
-  // Hardcoded ID Siswa Andi untuk MVP
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001';
+  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
-    fetchDashboard();
+    if (SISWA_ID) fetchDashboard();
+
+    if (!SISWA_ID) return;
 
     const channel = supabase.channel('siswa-dashboard-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'konten' }, () => fetchDashboard())
@@ -25,9 +27,10 @@ export default function SiswaDashboard() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [SISWA_ID]);
 
   const fetchDashboard = async () => {
+    if (!SISWA_ID) return;
     setLoading(true);
 
     // 1. Profil siswa
@@ -54,11 +57,14 @@ export default function SiswaDashboard() {
       kelasId,
     });
 
-    // 2. Rata-rata nilai
-    const { data: jawaban } = await supabase.from('jawaban_siswa').select('skor_final').eq('siswa_id', SISWA_ID).eq('status', 'final');
-    if (jawaban && jawaban.length > 0) {
-      const total = jawaban.reduce((acc, curr) => acc + (Number(curr.skor_final) || 0), 0);
-      setRataRata(Math.round(total / jawaban.length));
+    // 2. Rata-rata nilai (gabungan pengetahuan + kreativitas dari tabel nilai)
+    const { data: nilaiData } = await supabase.from('nilai').select('pengetahuan, kreativitas').eq('siswa_id', SISWA_ID);
+    if (nilaiData && nilaiData.length > 0) {
+      const total = nilaiData.reduce((acc, curr) => {
+        const rata = Math.round((Number(curr.kreativitas || 0) * 0.2) + (Number(curr.pengetahuan || 0) * 0.8));
+        return acc + rata;
+      }, 0);
+      setRataRata(Math.round(total / nilaiData.length));
     }
 
     if (babIds.length > 0) {
@@ -100,6 +106,8 @@ export default function SiswaDashboard() {
   };
 
   if (loading) return <div className="text-center mt-4">Memuat data dashboard...</div>;
+
+  if (userLoading) return <div className="p-4 text-center">Loading...</div>;
 
   return (
     <div>

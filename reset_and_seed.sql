@@ -12,17 +12,19 @@ DELETE FROM public.siswa_kelas;
 DELETE FROM public.kelas;
 DELETE FROM public.users;
 -- Hapus semua user
+DELETE FROM auth.identities;
 DELETE FROM auth.users;
 
 
 -- 2. INJECT DATA (SEEDING)
 
 -- Insert Kelas
-INSERT INTO public.kelas (id, nama)
+INSERT INTO public.kelas (id, nama, angkatan, sub_kelas)
 VALUES 
-  ('11111111-1111-1111-1111-111111111111', '7'),
-  ('22222222-2222-2222-2222-222222222222', '8'),
-  ('33333333-3333-3333-3333-333333333333', '9')
+  ('11111111-1111-1111-1111-111111111111', '7A', '7', 'A'),
+  ('22222222-2222-2222-2222-222222222222', '7B', '7', 'B'),
+  ('33333333-3333-3333-3333-333333333333', '8A', '8', 'A'),
+  ('44444444-4444-4444-4444-444444444444', '9', '9', null)
 ON CONFLICT (id) DO NOTHING;
 
 -- Insert Bab
@@ -57,27 +59,36 @@ BEGIN
   -- 1. Insert Admin
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = admin_uid) THEN
     INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-    VALUES (admin_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email"}', '{}');
+    VALUES (admin_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}');
     
+    INSERT INTO auth.identities (id, user_id, provider_id, identity_data, provider, created_at, updated_at)
+    VALUES (gen_random_uuid(), admin_uid, admin_uid::text, format('{"sub":"%s","email":"%s"}', admin_uid::text, 'admin@gmail.com')::jsonb, 'email', now(), now());
+
     UPDATE public.users SET role = 'admin', nama = 'Bapak Kepala Admin' WHERE id = admin_uid;
   END IF;
 
   -- 2. Insert Guru
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = guru_uid) THEN
     INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-    VALUES (guru_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'guru@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email"}', '{}');
+    VALUES (guru_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'guru@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}');
     
+    INSERT INTO auth.identities (id, user_id, provider_id, identity_data, provider, created_at, updated_at)
+    VALUES (gen_random_uuid(), guru_uid, guru_uid::text, format('{"sub":"%s","email":"%s"}', guru_uid::text, 'guru@gmail.com')::jsonb, 'email', now(), now());
+
     UPDATE public.users SET role = 'guru', nama = 'Ibu Guru Matematika' WHERE id = guru_uid;
     
     INSERT INTO public.guru_kelas (guru_id, kelas_id) 
-    VALUES (guru_uid, '11111111-1111-1111-1111-111111111111'), (guru_uid, '22222222-2222-2222-2222-222222222222') ON CONFLICT DO NOTHING;
+    VALUES (guru_uid, '11111111-1111-1111-1111-111111111111'), (guru_uid, '44444444-4444-4444-4444-444444444444') ON CONFLICT DO NOTHING;
   END IF;
 
   -- 3. Insert Siswa 1 (Lengkap dengan Biodata)
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = siswa1_uid) THEN
     INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-    VALUES (siswa1_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'siswa@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email"}', '{}');
+    VALUES (siswa1_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'siswa@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}');
     
+    INSERT INTO auth.identities (id, user_id, provider_id, identity_data, provider, created_at, updated_at)
+    VALUES (gen_random_uuid(), siswa1_uid, siswa1_uid::text, format('{"sub":"%s","email":"%s"}', siswa1_uid::text, 'siswa@gmail.com')::jsonb, 'email', now(), now());
+
     UPDATE public.users 
     SET 
       nama = 'Andi Siswa Rajin',
@@ -96,8 +107,11 @@ BEGIN
   -- 4. Insert Siswa 2 (Lengkap dengan Biodata)
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = siswa2_uid) THEN
     INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-    VALUES (siswa2_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'budi@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email"}', '{}');
+    VALUES (siswa2_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'budi@gmail.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}');
     
+    INSERT INTO auth.identities (id, user_id, provider_id, identity_data, provider, created_at, updated_at)
+    VALUES (gen_random_uuid(), siswa2_uid, siswa2_uid::text, format('{"sub":"%s","email":"%s"}', siswa2_uid::text, 'budi@gmail.com')::jsonb, 'email', now(), now());
+
     UPDATE public.users 
     SET 
       nama = 'Budi Santoso',

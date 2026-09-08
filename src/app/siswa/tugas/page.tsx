@@ -1,8 +1,11 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaTugas() {
+  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
   const [loading, setLoading] = useState(true);
   const [kuisList, setKuisList] = useState<any[]>([]); // Menyimpan daftar Kuis (Konten)
   const [submittedKuis, setSubmittedKuis] = useState<Record<string, boolean>>({});
@@ -10,33 +13,30 @@ export default function SiswaTugas() {
   const [soalKuis, setSoalKuis] = useState<any[]>([]);
   
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [jawaban, setJawaban] = useState<Record<string, string>>({});
+  const [jawaban, setJawaban] = useState<Record<string, any>>({});
   const [status, setStatus] = useState<'milih_kuis' | 'mengerjakan' | 'loading' | 'selesai'>('milih_kuis');
   const [hasil, setHasil] = useState<{ totalSkor: number, detail: any[] } | null>(null);
 
-  // Asumsi: Kita mock siswa login ID karena belum ada global auth state di MVP client ini
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001'; // ID Andi dari seed
-
   useEffect(() => {
-    fetchAvailableKuis();
+    if (SISWA_ID) fetchAvailableKuis();
 
     // Listen to updates from Guru adding new Kuis, Bab, or Soal
     const channel = supabase.channel('siswa-tugas-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'konten' }, () => {
-        fetchAvailableKuis();
+        if (SISWA_ID) fetchAvailableKuis();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bab' }, () => {
-        fetchAvailableKuis();
+        if (SISWA_ID) fetchAvailableKuis();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'soal' }, () => {
-        fetchAvailableKuis();
+        if (SISWA_ID) fetchAvailableKuis();
       })
       .subscribe();
       
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [SISWA_ID]);
 
   const fetchAvailableKuis = async () => {
     setLoading(true);
@@ -121,7 +121,18 @@ export default function SiswaTugas() {
   const isLastQuestion = currentIndex === soalKuis.length - 1;
 
   const handleJawabanChange = (val: string) => {
+    if (!soal) return;
     setJawaban(prev => ({ ...prev, [soal.id]: val }));
+  };
+
+  const handleCheckboxChange = (opt: string) => {
+    if (!soal) return;
+    setJawaban(prev => {
+      const current = Array.isArray(prev[soal.id]) ? prev[soal.id] : [];
+      const isChecked = current.includes(opt);
+      const newAnswers = isChecked ? current.filter((x: string) => x !== opt) : [...current, opt];
+      return { ...prev, [soal.id]: newAnswers };
+    });
   };
   
   const insertSymbol = (symbol: string) => {
@@ -142,34 +153,47 @@ export default function SiswaTugas() {
   const handleSubmit = async () => {
     setStatus('loading');
     
-    let totalSkor = 0;
+    let sumAi = 0;
     const detailHasil: any[] = [];
     const dbInserts: any[] = [];
+    const soalIds: string[] = [];
 
     // Evaluasi setiap soal
     for (const item of soalKuis) {
+      soalIds.push(item.id);
       const jawabSiswa = jawaban[item.id] || '';
       
-      // Karena kita bikin dinamis, poin disamakan saja jadi 100 / jumlah soal
-      const poinPerSoal = Math.round(100 / soalKuis.length);
-      
       if (item.tipe === 'pg') {
-        const isBenar = jawabSiswa === item.kunci_jawaban;
-        const skorDiperoleh = isBenar ? poinPerSoal : 0;
-        totalSkor += skorDiperoleh;
+        let isBenar = false;
+        
+        try {
+          const kunciArray = JSON.parse(item.kunci_jawaban);
+          const jawabArray = Array.isArray(jawabSiswa) ? jawabSiswa : [jawabSiswa];
+          
+          // Sort both arrays and compare stringified version for exact match
+          const kStr = JSON.stringify([...kunciArray].sort());
+          const jStr = JSON.stringify([...jawabArray].sort());
+          isBenar = kStr === jStr;
+        } catch (e) {
+          // Fallback if parsing fails (e.g. old data or plain string)
+          isBenar = jawabSiswa === item.kunci_jawaban;
+        }
+
+        const skorAi = isBenar ? 100 : 0;
+        sumAi += skorAi;
         
         detailHasil.push({
-          soal: item.pertanyaan,
-          skor: skorDiperoleh,
-          maksSkor: poinPerSoal,
-          feedback: isBenar ? 'Benar!' : `Salah. Jawaban benar: ${item.kunci_jawaban}`
+          soal: item.pertanyaan.split('|||')[0], // Clean up UI rendering for feedback
+          skor: skorAi,
+          maksSkor: 100,
+          feedback: isBenar ? 'Benar!' : `Salah. Jawaban yang benar tidak sesuai.`
         });
 
         dbInserts.push({
           soal_id: item.id,
           siswa_id: SISWA_ID,
-          jawaban: jawabSiswa,
-          skor_ai: skorDiperoleh,
+          jawaban: typeof jawabSiswa === 'string' ? jawabSiswa : JSON.stringify(jawabSiswa),
+          skor_ai: isBenar ? 100 : 0, // Selalu simpan skala 0-100 di database
           feedback_ai: isBenar ? 'Auto-Graded: Benar' : 'Auto-Graded: Salah',
           status: 'pending_verifikasi'
         });
@@ -192,13 +216,12 @@ export default function SiswaTugas() {
             throw new Error(data.error || data.feedback || 'Invalid response from AI');
           }
           
-          const skorBerdasarkanBobot = Math.round((data.skor / 100) * poinPerSoal);
-          totalSkor += skorBerdasarkanBobot;
+          sumAi += data.skor;
           
           detailHasil.push({
             soal: item.pertanyaan,
-            skor: skorBerdasarkanBobot,
-            maksSkor: poinPerSoal,
+            skor: data.skor,
+            maksSkor: 100,
             feedback: `(AI) ${data.feedback}`
           });
 
@@ -206,7 +229,7 @@ export default function SiswaTugas() {
             soal_id: item.id,
             siswa_id: SISWA_ID,
             jawaban: jawabSiswa,
-            skor_ai: skorBerdasarkanBobot,
+            skor_ai: data.skor, // Selalu simpan skala 0-100 dari AI
             feedback_ai: data.feedback,
             status: 'pending_verifikasi'
           });
@@ -215,7 +238,7 @@ export default function SiswaTugas() {
           detailHasil.push({
             soal: item.pertanyaan,
             skor: 0,
-            maksSkor: poinPerSoal,
+            maksSkor: 100,
             feedback: 'Gagal menghubungi AI untuk koreksi.'
           });
           dbInserts.push({
@@ -230,16 +253,26 @@ export default function SiswaTugas() {
       }
     }
 
+    // Hapus jawaban lama untuk kuis ini agar tidak duplikat jika siswa resubmit
+    if (soalIds.length > 0) {
+      const { error: delError } = await supabase.from('jawaban_siswa')
+        .delete()
+        .eq('siswa_id', SISWA_ID)
+        .in('soal_id', soalIds);
+      if (delError) console.error('Error delete old answers:', delError);
+    }
+
     // Insert ke DB!
     const { error: dbError } = await supabase.from('jawaban_siswa').insert(dbInserts);
     if (dbError) {
       console.error('Error insert jawaban:', dbError);
-      alert('Gagal mengirim jawaban ke server: ' + dbError.message);
+      customAlert('Gagal mengirim jawaban ke server: ' + dbError.message, true);
       setStatus('milih_kuis');
       return;
     }
 
-    setHasil({ totalSkor, detail: detailHasil });
+    const finalSkor = Math.round(sumAi / Math.max(1, soalKuis.length));
+    setHasil({ totalSkor: finalSkor, detail: detailHasil });
     setStatus('selesai');
     
     // Update local state directly so it reflects instantly without relying on a refetch
@@ -261,7 +294,7 @@ export default function SiswaTugas() {
     }
   };
 
-  if (loading) return <div className="text-center mt-4">Loading data...</div>;
+  if (loading || userLoading) return <div className="text-center mt-4">Loading data...</div>;
 
   if (status === 'milih_kuis') {
     return (
@@ -375,16 +408,32 @@ export default function SiswaTugas() {
           <div className="options-container" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
              {(() => {
                  let options: string[] = [];
+                 let isMultiple = false;
                  if (soal.pertanyaan.includes('|||')) {
-                    try { options = JSON.parse(soal.pertanyaan.split('|||')[1]); } catch(e) {}
+                    const parts = soal.pertanyaan.split('|||');
+                    try { options = JSON.parse(parts[1]); } catch(e) {}
+                    if (parts.length > 2) isMultiple = parts[2] === 'true';
                  }
                  return options.length > 0 ? (
-                    options.map((opt, i) => (
-                      <label key={i} className="d-flex align-center gap-2 p-3 border rounded" style={{ cursor: 'pointer', background: jawaban[soal.id] === opt ? 'var(--blue-50)' : 'transparent', borderColor: jawaban[soal.id] === opt ? 'var(--blue-500)' : '#ddd', margin: 0 }}>
-                         <input type="radio" name={`soal-${soal.id}`} value={opt} checked={jawaban[soal.id] === opt} onChange={e => handleJawabanChange(e.target.value)} style={{ transform: 'scale(1.2)', marginRight: '8px' }} />
-                         {opt}
-                      </label>
-                    ))
+                    options.map((opt, i) => {
+                      const isChecked = isMultiple 
+                        ? (Array.isArray(jawaban[soal.id]) && jawaban[soal.id].includes(opt))
+                        : jawaban[soal.id] === opt;
+                      
+                      return (
+                        <label key={i} className="d-flex align-center gap-2 p-3 border rounded" style={{ cursor: 'pointer', background: isChecked ? 'var(--blue-50)' : 'transparent', borderColor: isChecked ? 'var(--blue-500)' : '#ddd', margin: 0 }}>
+                           <input 
+                             type={isMultiple ? "checkbox" : "radio"} 
+                             name={`soal-${soal.id}`} 
+                             value={opt} 
+                             checked={isChecked} 
+                             onChange={e => isMultiple ? handleCheckboxChange(opt) : handleJawabanChange(e.target.value)} 
+                             style={{ transform: 'scale(1.2)', marginRight: '8px' }} 
+                           />
+                           {opt}
+                        </label>
+                      );
+                    })
                  ) : (
                     <input type="text" className="form-control" value={jawaban[soal.id] || ''} onChange={e => handleJawabanChange(e.target.value)} placeholder="Ketik persis opsi jawabannya..." />
                  );

@@ -11,16 +11,21 @@ export async function POST(req: Request) {
     }
 
     const prompt = `
-      Kamu adalah penilai soal matematika tingkat SMP.
+      Kamu adalah penilai soal matematika tingkat SMP yang sangat baik hati dan suportif.
       Pertanyaan: ${pertanyaan}
       Kunci Jawaban: ${kunciJawaban}
       Jawaban Siswa: ${jawabanSiswa}
       
-      Berikan skor antara 0 hingga 100 dan berikan feedback singkat dalam Bahasa Indonesia.
+      Aturan Penilaian (0-100):
+      - Berikan skor kemurahan hati (minimal 40) jika siswa sudah mencoba menjawab panjang lebar meskipun salah, untuk menghargai usahanya.
+      - Jika jawabannya benar atau mendekati benar secara konsep, berikan skor 80-100.
+      - Jangan memberikan skor di bawah 20 kecuali jawabannya benar-benar kosong atau ngawur (misal: "tidak tahu").
+      
+      Berikan feedback singkat, membangun, dan ramah dalam Bahasa Indonesia.
       Kembalikan response hanya dalam format JSON murni:
       {
         "skor": 85,
-        "feedback": "Penjelasan langkah-langkah sudah cukup baik, tapi ada sedikit kesalahan di hasil akhir."
+        "feedback": "Penjelasan langkah-langkah sudah cukup baik, tapi ada sedikit kesalahan di hasil akhir. Tetap semangat!"
       }
     `;
 

@@ -2,31 +2,30 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { customAlert } from '@/lib/customAlert';
 
 export default function SiswaMateri() {
   const [babs, setBabs] = useState<any[]>([]);
   const [materi, setMateri] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
 
-  // Hardcoded ID Siswa Andi untuk MVP
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001';
+  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
-    fetchMateri();
+    if (SISWA_ID) fetchMateri();
+
+    if (!SISWA_ID) return;
 
     const channel = supabase.channel('siswa-materi-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bab' }, () => {
-        fetchMateri();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'konten' }, () => {
-        fetchMateri();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bab' }, () => fetchMateri())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'konten' }, () => fetchMateri())
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [SISWA_ID]);
 
   const fetchMateri = async () => {
     setLoading(true);
@@ -63,6 +62,8 @@ export default function SiswaMateri() {
 
   if (loading) return <div className="text-center mt-4">Loading materi belajar...</div>;
 
+  if (userLoading) return <div className="p-4 text-center">Loading...</div>;
+
   return (
     <div className="card card-body">
       <h3 className="mb-3">Modul Bacaan & Materi Pembelajaran</h3>
@@ -98,7 +99,7 @@ export default function SiswaMateri() {
                             target="_blank" 
                             rel="noopener noreferrer" 
                             className="btn btn-sm btn-primary"
-                            onClick={(e) => { if (!m.file_url) { e.preventDefault(); alert('Link materi belum ditambahkan oleh guru.'); } }}
+                            onClick={(e) => { if (!m.file_url) { e.preventDefault(); customAlert('Link materi belum ditambahkan oleh guru.', true); } }}
                           >
                             Buka / Download
                           </a>

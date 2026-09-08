@@ -1,10 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function GuruPresensi() {
+  const { userId, loading: userLoading } = useCurrentUser();
   const [tanggal, setTanggal] = useState(new Date().toISOString().split('T')[0]);
-  const [kelas, setKelas] = useState('7');
+  const [kelas, setKelas] = useState('');
+  const [assignedClasses, setAssignedClasses] = useState<any[]>([]);
   
   const [loading, setLoading] = useState(false);
   const [siswaList, setSiswaList] = useState<any[]>([]);
@@ -13,26 +17,40 @@ export default function GuruPresensi() {
   const [realKelasId, setRealKelasId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSiswa();
+    if (userId) {
+      fetchAssignedClasses();
+    }
+  }, [userId]);
+
+  const fetchAssignedClasses = async () => {
+    const { data } = await supabase
+      .from('guru_kelas')
+      .select('kelas_id, kelas:kelas_id(id, nama)')
+      .eq('guru_id', userId);
+    
+    if (data && data.length > 0) {
+      const classes = data.map(d => d.kelas);
+      classes.sort((a: any, b: any) => a.nama.localeCompare(b.nama));
+      setAssignedClasses(classes);
+      setKelas(classes[0].id);
+    }
+  };
+
+  useEffect(() => {
+    if (kelas && tanggal) fetchSiswa();
   }, [kelas, tanggal]);
 
   const fetchSiswa = async () => {
+    if (!kelas) return;
     setLoading(true);
     setSaved(false);
+    setRealKelasId(kelas);
     
-    // 1. Cari UUID kelas berdasarkan nama
-    const { data: dataKelas } = await supabase.from('kelas').select('id').eq('nama', kelas).single();
-    if (!dataKelas) {
-      setLoading(false);
-      return;
-    }
-    setRealKelasId(dataKelas.id);
-
     // 2. Cari Siswa di kelas tersebut via siswa_kelas join users
     const { data: dataSiswa } = await supabase
       .from('siswa_kelas')
       .select('siswa_id, users(nama)')
-      .eq('kelas_id', dataKelas.id);
+      .eq('kelas_id', kelas);
       
     if (dataSiswa) {
       const formatted = dataSiswa.map((s: any) => ({
@@ -45,7 +63,7 @@ export default function GuruPresensi() {
       const { data: presensiHariIni } = await supabase
         .from('presensi')
         .select('siswa_id, status')
-        .eq('kelas_id', dataKelas.id)
+        .eq('kelas_id', kelas)
         .eq('tanggal', tanggal);
         
       const kehMap: Record<string, string> = {};
@@ -88,7 +106,7 @@ export default function GuruPresensi() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
-      alert("Gagal menyimpan presensi: " + err.message);
+      customAlert("Gagal menyimpan presensi: " + err.message, true);
     } finally {
       setLoading(false);
     }
@@ -100,10 +118,11 @@ export default function GuruPresensi() {
         <div className="grid-2 align-center">
           <div className="form-group mb-0">
             <label>Pilih Kelas</label>
-            <select className="form-control" value={kelas} onChange={(e) => setKelas(e.target.value)}>
-              <option value="7">Kelas 7</option>
-              <option value="8">Kelas 8</option>
-              <option value="9">Kelas 9</option>
+            <select className="form-control" value={kelas} onChange={(e) => setKelas(e.target.value)} disabled={assignedClasses.length === 0}>
+              {assignedClasses.length === 0 && <option value="">Tidak ada kelas</option>}
+              {assignedClasses.map(c => (
+                <option key={c.id} value={c.id}>Kelas {c.nama}</option>
+              ))}
             </select>
           </div>
           <div className="form-group mb-0">

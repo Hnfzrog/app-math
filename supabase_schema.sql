@@ -13,8 +13,11 @@ create table public.users (
 -- 2. KELAS TABLE
 create table public.kelas (
   id uuid default uuid_generate_v4() primary key,
-  nama text not null check (nama in ('7', '8', '9')),
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  nama text not null, -- computed or backwards compatible (angkatan + sub_kelas)
+  angkatan text not null default '7',
+  sub_kelas text default null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  constraint kelas_angkatan_sub_unique unique (angkatan, sub_kelas)
 );
 
 -- 3. SISWA_KELAS (Junction)
@@ -127,3 +130,26 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS nisn varchar(20);
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS tanggal_lahir date;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS jenis_kelamin varchar(10) check (jenis_kelamin in ('Laki-laki', 'Perempuan'));
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS nomor_hp varchar(20);
+
+-- Allow guru to delete konten di kelas yang mereka ajar
+CREATE POLICY "Guru can delete konten in their kelas" ON public.konten
+  FOR DELETE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.bab b
+      JOIN public.guru_kelas gk ON gk.kelas_id = b.kelas_id
+      WHERE b.id = konten.bab_id
+      AND gk.guru_id = auth.uid()
+    )
+  );
+
+-- Allow guru to delete bab di kelas yang mereka ajar
+CREATE POLICY "Guru can delete bab in their kelas" ON public.bab
+  FOR DELETE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.guru_kelas gk
+      WHERE gk.kelas_id = bab.kelas_id
+      AND gk.guru_id = auth.uid()
+    )
+  );

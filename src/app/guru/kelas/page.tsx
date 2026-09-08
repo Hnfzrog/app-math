@@ -2,24 +2,25 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function GuruKelas() {
   const [kelasList, setKelasList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Hardcoded ID Guru Budi untuk MVP
-  const GURU_ID = 'f0000000-0000-0000-0000-000000000001';
+  const { userId, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
-    fetchKelas();
-  }, []);
+    if (userId) fetchKelas();
+  }, [userId]);
 
   const fetchKelas = async () => {
+    if (!userId) return;
     setLoading(true);
     const { data: guruKelas } = await supabase
       .from('guru_kelas')
-      .select('kelas(id, nama)')
-      .eq('guru_id', GURU_ID);
+      .select('kelas(id, nama, angkatan, sub_kelas)')
+      .eq('guru_id', userId);
 
     if (guruKelas) {
       // @ts-ignore
@@ -28,6 +29,8 @@ export default function GuruKelas() {
     }
     setLoading(false);
   };
+
+  if (userLoading) return <div className="p-4 text-center">Loading...</div>;
 
   return (
     <div className="card card-body">
@@ -41,7 +44,7 @@ export default function GuruKelas() {
         <div className="grid-2">
           {kelasList.map((kelas) => (
             <div key={kelas.id} className="card card-body text-center" style={{ padding: '2rem' }}>
-              <h2 className="mb-3">{kelas.nama}</h2>
+              <h2 className="mb-3">Kelas {kelas.angkatan}{kelas.sub_kelas || ''}</h2>
               <Link href={`/guru/kelas/${kelas.id}`} className="btn btn-primary w-100">
                 Kelola Modul & Materi →
               </Link>

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaKelas() {
   const [loading, setLoading] = useState(true);
@@ -10,14 +11,14 @@ export default function SiswaKelas() {
   const [babs, setBabs] = useState<any[]>([]);
   const [teman, setTeman] = useState<any[]>([]);
 
-  // Hardcoded ID Siswa Andi untuk MVP
-  const SISWA_ID = 'e0000000-0000-0000-0000-000000000001';
+  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
-    fetchKelas();
-  }, []);
+    if (SISWA_ID) fetchKelas();
+  }, [SISWA_ID]);
 
   const fetchKelas = async () => {
+    if (!SISWA_ID) return;
     setLoading(true);
 
     // 1. Dapatkan kelas siswa
@@ -78,7 +79,8 @@ export default function SiswaKelas() {
     setLoading(false);
   };
 
-  if (loading) return <div className="text-center mt-4">Memuat informasi kelas...</div>;
+  if (loading) return <div className="text-center mt-4">Loading data kelas...</div>;
+  if (userLoading) return <div className="text-center mt-4">Loading user...</div>;
 
   if (!kelasInfo) return (
     <div className="card card-body">

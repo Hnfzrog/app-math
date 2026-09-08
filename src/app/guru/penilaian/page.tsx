@@ -1,9 +1,13 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function GuruPenilaian() {
-  const [kelas, setKelas] = useState('7');
+  const { userId, loading: userLoading } = useCurrentUser();
+  const [kelas, setKelas] = useState('');
+  const [assignedClasses, setAssignedClasses] = useState<any[]>([]);
   const [bab, setBab] = useState('');
   const [babs, setBabs] = useState<any[]>([]);
   
@@ -14,7 +18,28 @@ export default function GuruPenilaian() {
   const [selectedSiswa, setSelectedSiswa] = useState<any>(null);
 
   useEffect(() => {
-    fetchBabs();
+    if (userId) {
+      fetchAssignedClasses();
+    }
+  }, [userId]);
+
+  const fetchAssignedClasses = async () => {
+    const { data } = await supabase
+      .from('guru_kelas')
+      .select('kelas_id, kelas:kelas_id(id, nama)')
+      .eq('guru_id', userId);
+    
+    if (data && data.length > 0) {
+      const classes = data.map(d => d.kelas);
+      // Sort classes by name
+      classes.sort((a: any, b: any) => a.nama.localeCompare(b.nama));
+      setAssignedClasses(classes);
+      setKelas(classes[0].id);
+    }
+  };
+
+  useEffect(() => {
+    if (kelas) fetchBabs();
   }, [kelas]);
 
   useEffect(() => {
@@ -24,7 +49,7 @@ export default function GuruPenilaian() {
       // Realtime listener
       const channel = supabase.channel('guru-penilaian-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'jawaban_siswa' }, () => {
-          fetchJawaban();
+          fetchJawaban(true);
         })
         .subscribe();
         
@@ -35,20 +60,18 @@ export default function GuruPenilaian() {
   }, [bab]);
 
   const fetchBabs = async () => {
-    const { data: dataKelas } = await supabase.from('kelas').select('id').eq('nama', kelas).single();
-    if (dataKelas) {
-      const { data } = await supabase.from('bab').select('*').eq('kelas_id', dataKelas.id).order('nomor');
-      setBabs(data || []);
-      if (data && data.length > 0) setBab(data[0].id);
-      else {
-        setBab('');
-        setSiswaAnswers([]);
-      }
+    if (!kelas) return;
+    const { data } = await supabase.from('bab').select('*').eq('kelas_id', kelas).order('nomor');
+    setBabs(data || []);
+    if (data && data.length > 0) setBab(data[0].id);
+    else {
+      setBab('');
+      setSiswaAnswers([]);
     }
   };
 
-  const fetchJawaban = async () => {
-    setLoading(true);
+  const fetchJawaban = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     // Cari semua jawaban_siswa di bab ini. Karena soal berelasi ke konten, konten ke bab.
     // Untuk MVP, kita group berdasarkan siswa_id yang mengerjakan soal dari bab ini.
     
@@ -95,7 +118,7 @@ export default function GuruPenilaian() {
             mapSiswa[j.siswa_id].total_ai += Number(j.skor_ai || 0);
             mapSiswa[j.siswa_id].count += 1;
             mapSiswa[j.siswa_id].id_jawaban.push(j.id);
-            mapSiswa[j.siswa_id].details.push({ pertanyaan: mapSoal[j.soal_id] || '-', jawaban: j.jawaban, skor_ai: j.skor_ai, status: j.status });
+            mapSiswa[j.siswa_id].details.push({ id: j.id, pertanyaan: mapSoal[j.soal_id] || '-', jawaban: j.jawaban, skor_ai: j.skor_ai, status: j.status });
             if (j.status === 'pending_verifikasi') mapSiswa[j.siswa_id].has_pending = true;
           });
           
@@ -125,14 +148,22 @@ export default function GuruPenilaian() {
           mapSiswa[j.siswa_id].total_ai += Number(j.skor_ai || 0);
           mapSiswa[j.siswa_id].count += 1;
           mapSiswa[j.siswa_id].id_jawaban.push(j.id);
-          mapSiswa[j.siswa_id].details.push({ pertanyaan: mapSoal[j.soal_id] || '-', jawaban: j.jawaban, skor_ai: j.skor_ai, status: j.status });
+          mapSiswa[j.siswa_id].details.push({ id: j.id, pertanyaan: mapSoal[j.soal_id] || '-', jawaban: j.jawaban, skor_ai: j.skor_ai, status: j.status });
           
           if (j.status === 'pending_verifikasi') {
             mapSiswa[j.siswa_id].has_pending = true;
           }
         });
         
+        // Load nilai keaktifan dari tabel nilai
+        const { data: nilaiData } = await supabase.from('nilai').select('siswa_id, kreativitas').eq('bab_id', bab);
+        const verifiedIds = new Set(nilaiData?.map(n => n.siswa_id) || []);
+
         const finalArr = Object.values(mapSiswa).map((s: any) => {
+          if (verifiedIds.has(s.id)) {
+            s.has_pending = false;
+          }
+
           if (!s.has_pending) {
             setVerified(prev => ({ ...prev, [s.id]: true }));
           } else {
@@ -145,6 +176,17 @@ export default function GuruPenilaian() {
         });
         
         setSiswaAnswers(finalArr);
+
+        const newKeaktifan: Record<string, number> = {};
+        if (nilaiData) {
+           nilaiData.forEach(n => {
+              let val = n.kreativitas || 0;
+              if (val > 100) val = 100;
+              if (val < 0) val = 0;
+              newKeaktifan[n.siswa_id] = val;
+           });
+        }
+        setKeaktifan(newKeaktifan);
       }
     } else {
       setSiswaAnswers([]);
@@ -153,11 +195,25 @@ export default function GuruPenilaian() {
     setLoading(false);
   };
 
+  const handleUpdateSkorAI = async (idJawaban: string, newSkor: number) => {
+    if (newSkor < 0 || newSkor > 100) {
+       customAlert('Skor harus antara 0 dan 100', true);
+       return;
+    }
+    const { error } = await supabase.from('jawaban_siswa').update({ skor_ai: newSkor }).eq('id', idJawaban);
+    if (error) {
+       console.error('Gagal update skor AI:', error);
+       customAlert('Gagal mengupdate skor AI.', true);
+    } else {
+       fetchJawaban();
+    }
+  };
+
   const handleVerifikasi = async (siswaId: string, avgAi: number, ids: string[]) => {
     const nilaiAktif = keaktifan[siswaId] || 0;
     const totalAkhir = Math.round((nilaiAktif * 0.2) + (avgAi * 0.8));
     
-    // Update ke DB
+    // Update ke DB (status jawaban_siswa)
     let hasError = false;
     for (const jid of ids) {
       const { data: updatedData, error } = await supabase.from('jawaban_siswa').update({
@@ -171,11 +227,29 @@ export default function GuruPenilaian() {
       }
     }
     
+    // Simpan ke tabel nilai (Hapus nilai lama untuk bab ini jika ada, lalu insert baru)
+    if (!hasError && bab) {
+      const { error: delError } = await supabase.from('nilai').delete().eq('siswa_id', siswaId).eq('bab_id', bab);
+      if (delError) console.error('Gagal hapus nilai lama:', delError);
+      
+      const { error: insError } = await supabase.from('nilai').insert({
+        siswa_id: siswaId,
+        bab_id: bab,
+        pengetahuan: avgAi,
+        kreativitas: nilaiAktif
+      });
+      
+      if (insError) {
+        console.error('Gagal insert ke tabel nilai:', insError);
+        hasError = true;
+      }
+    }
+    
     if (hasError) {
-      alert('Gagal memverifikasi nilai. Hal ini biasanya terjadi karena Row Level Security (RLS) di Supabase memblokir operasi UPDATE. Silakan matikan RLS pada tabel jawaban_siswa.');
+      customAlert('Gagal memverifikasi nilai. Hal ini biasanya terjadi karena Row Level Security (RLS) di Supabase memblokir operasi UPDATE. Silakan matikan RLS pada tabel jawaban_siswa.', true);
     } else {
       setVerified(prev => ({ ...prev, [siswaId]: true }));
-      alert('Nilai berhasil dikunci dan dikirim ke siswa!');
+      customAlert('Nilai berhasil dikunci dan dikirim ke siswa!');
     }
   };
 
@@ -185,10 +259,11 @@ export default function GuruPenilaian() {
         <div className="grid-2 align-center">
           <div className="form-group mb-0">
             <label>Pilih Kelas</label>
-            <select className="form-control" value={kelas} onChange={(e) => setKelas(e.target.value)}>
-              <option value="7">Kelas 7</option>
-              <option value="8">Kelas 8</option>
-              <option value="9">Kelas 9</option>
+            <select className="form-control" value={kelas} onChange={(e) => setKelas(e.target.value)} disabled={assignedClasses.length === 0}>
+              {assignedClasses.length === 0 && <option value="">Tidak ada kelas</option>}
+              {assignedClasses.map(c => (
+                <option key={c.id} value={c.id}>Kelas {c.nama}</option>
+              ))}
             </select>
           </div>
           <div className="form-group mb-0">
@@ -237,8 +312,14 @@ export default function GuruPenilaian() {
                           type="number" 
                           className="form-control"
                           value={nilaiAktif === 0 ? '' : nilaiAktif} 
-                          onChange={(e) => setKeaktifan(prev => ({ ...prev, [siswa.id]: parseInt(e.target.value) || 0 }))}
-                          disabled={isVerified}
+                          onChange={(e) => {
+                             let val = parseInt(e.target.value) || 0;
+                             if (val > 100) val = 100;
+                             if (val < 0) val = 0;
+                             setKeaktifan(prev => ({ ...prev, [siswa.id]: val }));
+                          }}
+                          min="0"
+                          max="100"
                           style={{ width: '80px' }} 
                           placeholder="0"
                         />
@@ -253,7 +334,7 @@ export default function GuruPenilaian() {
                         <div style={{ display: 'flex', gap: '8px' }}>
                           <button onClick={() => setSelectedSiswa(siswa)} className="btn btn-sm btn-info">Detail</button>
                           {isVerified ? (
-                            <span className="badge badge-success">Terverifikasi</span>
+                            <button onClick={() => handleVerifikasi(siswa.id, siswa.avg_ai, siswa.id_jawaban)} className="btn btn-sm btn-primary">Update Nilai</button>
                           ) : (
                             <button onClick={() => handleVerifikasi(siswa.id, siswa.avg_ai, siswa.id_jawaban)} className="btn btn-sm btn-outline">Kunci Nilai</button>
                           )}
@@ -281,8 +362,33 @@ export default function GuruPenilaian() {
                 <div key={idx} className="card card-body mb-3" style={{ border: '1px solid #ddd', padding: '15px' }}>
                   <p><strong>Soal:</strong> {det.pertanyaan}</p>
                   <p><strong>Jawaban Siswa:</strong> <br /> <span style={{ whiteSpace: 'pre-wrap' }}>{det.jawaban || '-'}</span></p>
-                  <div className="d-flex justify-between mt-3">
-                    <span className="badge badge-info">Skor AI: {det.skor_ai}</span>
+                  <div className="d-flex justify-between mt-3 align-center">
+                    <div className="d-flex gap-2 align-center">
+                      <span className="text-sm font-bold">Skor AI:</span>
+                      <input 
+                        type="number" 
+                        className="form-control form-control-sm" 
+                        defaultValue={det.skor_ai} 
+                        onBlur={(e) => {
+                          const newScore = parseInt(e.target.value);
+                          if (!isNaN(newScore) && newScore !== det.skor_ai) {
+                            handleUpdateSkorAI(det.id, newScore);
+                            const updatedSiswa = { ...selectedSiswa };
+                            const targetDet = updatedSiswa.details.find((d: any) => d.id === det.id);
+                            if (targetDet) targetDet.skor_ai = newScore;
+                            
+                            // Recalculate avg_ai on the fly so it's instantly correct
+                            let total = 0;
+                            updatedSiswa.details.forEach((d: any) => total += Number(d.skor_ai || 0));
+                            updatedSiswa.avg_ai = Math.round(total / updatedSiswa.details.length);
+                            
+                            setSelectedSiswa(updatedSiswa);
+                          }
+                        }}
+                        style={{ width: '70px' }} 
+                        title="Klik untuk mengedit skor yang diberikan AI"
+                      />
+                    </div>
                     <span className={`badge ${det.status === 'final' ? 'badge-success' : 'badge-warning'}`}>
                       {det.status === 'final' ? 'Terverifikasi' : 'Menunggu Verifikasi'}
                     </span>
@@ -291,12 +397,12 @@ export default function GuruPenilaian() {
               ))}
               <div className="d-flex justify-between mt-4">
                 <button type="button" className="btn btn-secondary" onClick={() => setSelectedSiswa(null)}>Tutup</button>
-                {!verified[selectedSiswa.id] && (
-                  <button type="button" className="btn btn-primary" onClick={() => {
-                    handleVerifikasi(selectedSiswa.id, selectedSiswa.avg_ai, selectedSiswa.id_jawaban);
-                    setSelectedSiswa(null);
-                  }}>Kunci Nilai Siswa Ini</button>
-                )}
+                <button type="button" className="btn btn-primary" onClick={() => {
+                  handleVerifikasi(selectedSiswa.id, selectedSiswa.avg_ai, selectedSiswa.id_jawaban);
+                  setSelectedSiswa(null);
+                }}>
+                  {verified[selectedSiswa.id] ? 'Update Nilai Siswa Ini' : 'Kunci Nilai Siswa Ini'}
+                </button>
               </div>
             </div>
           </div>
