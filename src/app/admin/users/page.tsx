@@ -179,6 +179,33 @@ export default function AdminUsers() {
     );
   };
 
+  const generateEmail = (namaVal: string, nisnVal: string, roleVal: string) => {
+    const words = namaVal.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    // Ambil 2 kata pertama (atau 1 jika nama cuma 1 kata)
+    const prefix = words.slice(0, 2).join('').replace(/[^a-z0-9]/g, '');
+    if (!prefix) return '';
+    if (roleVal === 'siswa') {
+      const nisnSuffix = nisnVal.trim().slice(-3);
+      return nisnSuffix ? `${prefix}${nisnSuffix}@gmail.com` : '';
+    }
+    // guru: 2 kata pertama nama
+    return `${prefix}@gmail.com`;
+  };
+
+  const handleNamaChange = (val: string) => {
+    setNama(val);
+    if (!editingId) {
+      setEmail(generateEmail(val, nisn, role));
+    }
+  };
+
+  const handleNisnChange = (val: string) => {
+    setNisn(val);
+    if (!editingId) {
+      setEmail(generateEmail(nama, val, role));
+    }
+  };
+
   const bukaModalBaru = () => {
     setEditingId(null);
     setNama('');
@@ -255,7 +282,7 @@ export default function AdminUsers() {
                     type="text" 
                     className="form-control"
                     value={nama} 
-                    onChange={(e) => setNama(e.target.value)} 
+                    onChange={(e) => handleNamaChange(e.target.value)} 
                     placeholder="Contoh: Budi Santoso"
                     required
                   />
@@ -268,19 +295,32 @@ export default function AdminUsers() {
                       type="text" 
                       className="form-control"
                       value={nisn} 
-                      onChange={(e) => setNisn(e.target.value)}
+                      onChange={(e) => handleNisnChange(e.target.value)}
                       placeholder="Masukkan NISN Siswa"
                     />
                   </div>
                 )}
 
                 <div className="form-group">
-                  <label>Email (Otomatis)</label>
+                  <label>
+                    Email
+                    {!editingId && role === 'siswa' && (
+                      <span style={{ fontWeight: 'normal', color: 'var(--text-muted, #888)', marginLeft: '6px', fontSize: '0.82em' }}>
+                        (otomatis: nama depan + 3 digit NISN terakhir)
+                      </span>
+                    )}
+                    {!editingId && role !== 'siswa' && (
+                      <span style={{ fontWeight: 'normal', color: 'var(--text-muted, #888)', marginLeft: '6px', fontSize: '0.82em' }}>
+                        (isi manual)
+                      </span>
+                    )}
+                  </label>
                   <input 
                     type="email" 
                     className="form-control"
                     value={email} 
                     onChange={(e) => setEmail(e.target.value)}
+                    placeholder="contoh: budi123@gmail.com"
                     required
                   />
                 </div>
