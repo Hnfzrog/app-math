@@ -4,6 +4,16 @@ import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
+// Hitung tahun ajaran otomatis berdasarkan bulan sekarang
+// Juli (bulan 7) ke atas = tahun ini/tahun depan, sebelumnya = tahun lalu/tahun ini
+function getTahunAjaran() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-indexed
+  if (month >= 7) return `${year}/${year + 1}`;
+  return `${year - 1}/${year}`;
+}
+
 export default function SiswaKelas() {
   const [loading, setLoading] = useState(true);
   const [kelasInfo, setKelasInfo] = useState<any>(null);
@@ -100,7 +110,7 @@ export default function SiswaKelas() {
           }}>🏫</div>
           <div>
             <h2 style={{ margin: 0 }}>Informasi Kelas {kelasInfo.nama}</h2>
-            <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>Tahun Ajaran 2025/2026</p>
+            <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>Tahun Ajaran {getTahunAjaran()}</p>
           </div>
         </div>
 

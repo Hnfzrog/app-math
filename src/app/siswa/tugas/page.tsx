@@ -5,7 +5,7 @@ import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export default function SiswaTugas() {
-  const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
+  const { userId: SISWA_ID, userName: namaSiswa, loading: userLoading } = useCurrentUser();
   const [loading, setLoading] = useState(true);
   const [kuisList, setKuisList] = useState<any[]>([]); // Menyimpan daftar Kuis (Konten)
   const [submittedKuis, setSubmittedKuis] = useState<Record<string, boolean>>({});
@@ -380,7 +380,7 @@ export default function SiswaTugas() {
     <div className="exam-card">
       <div className="exam-top-bar">
         <h3>{selectedKuis?.judul}</h3>
-        <div className="exam-timer">Siswa: Andi</div>
+        <div className="exam-timer">Siswa: {namaSiswa || 'Siswa'}</div>
       </div>
       
       <div className="mb-3 d-flex justify-between align-center">

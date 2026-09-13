@@ -109,11 +109,17 @@ export default function GuruPenilaian() {
           .in('soal_id', idsToFilter);
           
         if (fallbackData) {
-          // Bikin data mock buat nama siswa
+          // Coba ambil nama siswa meskipun query join gagal
+          const fallbackSiswaIds = [...new Set(fallbackData.map(j => j.siswa_id))];
+          const { data: fallbackUsers } = await supabase.from('users').select('id, nama').in('id', fallbackSiswaIds);
+          const fallbackNamaMap: Record<string, string> = {};
+          fallbackUsers?.forEach(u => { fallbackNamaMap[u.id] = u.nama; });
+
+          // Bikin data dengan nama dari DB (atau fallback ke 'Siswa' jika tetap gagal)
           const mapSiswa: Record<string, any> = {};
           fallbackData.forEach(j => {
             if (!mapSiswa[j.siswa_id]) {
-              mapSiswa[j.siswa_id] = { id: j.siswa_id, nama: 'Siswa ID: ' + j.siswa_id.substring(0,6), total_ai: 0, count: 0, status: j.status, id_jawaban: [], has_pending: false, details: [] };
+              mapSiswa[j.siswa_id] = { id: j.siswa_id, nama: fallbackNamaMap[j.siswa_id] || 'Siswa', total_ai: 0, count: 0, status: j.status, id_jawaban: [], has_pending: false, details: [] };
             }
             mapSiswa[j.siswa_id].total_ai += Number(j.skor_ai || 0);
             mapSiswa[j.siswa_id].count += 1;

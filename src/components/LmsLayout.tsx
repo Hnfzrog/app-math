@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 interface LmsLayoutProps {
   children: React.ReactNode;
@@ -10,9 +11,25 @@ interface LmsLayoutProps {
   pageTitle?: string;
 }
 
-export default function LmsLayout({ children, role, userName = "Pengguna", pageTitle = "Dashboard" }: LmsLayoutProps) {
+export default function LmsLayout({ children, role, userName: userNameProp = "Pengguna", pageTitle = "Dashboard" }: LmsLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const [displayName, setDisplayName] = useState(userNameProp);
+
+  // Fetch nama asli dari DB berdasarkan sesi aktif
+  useEffect(() => {
+    const fetchName = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data } = await supabase
+        .from('users')
+        .select('nama')
+        .eq('id', session.user.id)
+        .single();
+      if (data?.nama) setDisplayName(data.nama);
+    };
+    fetchName();
+  }, []);
 
   const toggleSidebar = (state?: boolean) => {
     if (typeof state === 'boolean') {
@@ -28,6 +45,7 @@ export default function LmsLayout({ children, role, userName = "Pengguna", pageT
         { name: 'Dashboard', href: '/admin/dashboard', icon: '📊' },
         { name: 'Kelola User', href: '/admin/users', icon: '👥' },
         { name: 'Master Kelas', href: '/admin/kelas', icon: '🏫' },
+        { name: 'Profil Saya', href: '/admin/profile', icon: '👤' },
       ];
     } else if (role === 'guru') {
       return [
@@ -35,6 +53,7 @@ export default function LmsLayout({ children, role, userName = "Pengguna", pageT
         { name: 'Kelas Saya', href: '/guru/kelas', icon: '🏫' },
         { name: 'Presensi', href: '/guru/presensi', icon: '📋' },
         { name: 'Penilaian', href: '/guru/penilaian', icon: '✍️' },
+        { name: 'Profil Saya', href: '/guru/profile', icon: '👤' },
       ];
     } else {
       return [
@@ -61,18 +80,18 @@ export default function LmsLayout({ children, role, userName = "Pengguna", pageT
         </div>
 
         <div className="sidebar-user">
-          <div className="user-avatar">{userName.substring(0, 2).toUpperCase()}</div>
+          <div className="user-avatar">{displayName.substring(0, 2).toUpperCase()}</div>
           <div className="user-details">
-            <span className="user-name">{userName}</span>
+            <span className="user-name">{displayName}</span>
             <span className="user-role-badge">{role}</span>
           </div>
         </div>
 
         <nav className="sidebar-menu">
           {getNavLinks().map((link) => (
-            <Link 
-              key={link.href} 
-              href={link.href} 
+            <Link
+              key={link.href}
+              href={link.href}
               className={`nav-link ${pathname === link.href ? 'active' : ''}`}
               onClick={() => setSidebarOpen(false)}
             >
@@ -95,8 +114,8 @@ export default function LmsLayout({ children, role, userName = "Pengguna", pageT
       </aside>
 
       {/* OVERLAY FOR MOBILE SIDEBAR */}
-      <div 
-        className={`sidebar-overlay ${sidebarOpen ? 'show' : ''}`} 
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'show' : ''}`}
         onClick={() => toggleSidebar(false)}
       ></div>
 
@@ -118,7 +137,7 @@ export default function LmsLayout({ children, role, userName = "Pengguna", pageT
 
           <div className="topbar-right">
             <div className="topbar-user-info">
-              <span>{userName}</span>
+              <span>{displayName}</span>
               <span className="badge badge-primary">{role}</span>
             </div>
           </div>
