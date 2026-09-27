@@ -1,0 +1,440 @@
+<title>Panduan Instalasi AppMath</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600;6..72,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #FBFAF7;
+    --surface: #FFFFFF;
+    --surface-2: #F4F2EC;
+    --ink: #1B1A17;
+    --muted: #6B6862;
+    --line: #E4E1DA;
+    --accent: #0E5C63;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #E3F0EF;
+    --warn: #A85A0A;
+    --warn-soft: #FBF0E2;
+    --code-bg: #F2F0EA;
+    --radius: 10px;
+    --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+    --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161A;
+      --surface: #1C1F24;
+      --surface-2: #23272E;
+      --ink: #E9E7E2;
+      --muted: #9A968E;
+      --line: #2C313A;
+      --accent: #5EC8C0;
+      --accent-ink: #0B1517;
+      --accent-soft: #14302F;
+      --warn: #E0A458;
+      --warn-soft: #2E2417;
+      --code-bg: #23272E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161A;
+    --surface: #1C1F24;
+    --surface-2: #23272E;
+    --ink: #E9E7E2;
+    --muted: #9A968E;
+    --line: #2C313A;
+    --accent: #5EC8C0;
+    --accent-ink: #0B1517;
+    --accent-soft: #14302F;
+    --warn: #E0A458;
+    --warn-soft: #2E2417;
+    --code-bg: #23272E;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding-block: 48px 72px;
+    padding-inline: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  header.masthead { display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(34px, 6vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .lede { font-size: 18px; color: var(--muted); margin: 0; max-width: 58ch; }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;
+  }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    background: var(--surface);
+  }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 { font-size: 16px; font-weight: 600; margin: 0; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  strong { font-weight: 600; }
+
+  .rule { height: 1px; background: var(--line); border: 0; margin: 0; }
+
+  /* Checklist */
+  ul.check { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  ul.check li {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 12px;
+    align-items: start;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  ul.check .box {
+    width: 20px; height: 20px; border-radius: 5px;
+    border: 1.5px solid var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); font-size: 13px; line-height: 1; margin-top: 2px;
+  }
+  ul.check .t { font-weight: 600; display: block; }
+  ul.check .d { color: var(--muted); font-size: 14px; }
+
+  /* Steps */
+  ol.steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 16px; }
+  ol.steps > li {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .num {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-soft);
+  }
+  .step-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .step-body h3 { font-size: 17px; }
+  .step-body p { font-size: 15px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13.5px; }
+
+  pre {
+    margin: 0;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink);
+    white-space: pre;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+  .callout {
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 14px;
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    gap: 10px;
+    align-items: start;
+  }
+  .callout.tip { background: var(--accent-soft); color: var(--ink); }
+  .callout.warn { background: var(--warn-soft); color: var(--ink); }
+  .callout .ico { font-size: 15px; line-height: 1.4; }
+
+  /* Table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+  table { border-collapse: collapse; width: 100%; min-width: 460px; font-size: 14.5px; background: var(--surface); }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 500; width: 42%; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+    color: var(--muted);
+    font-size: 13.5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    justify-content: space-between;
+  }
+
+  @media (max-width: 520px) {
+    .wrap { padding-block: 32px 56px; }
+    ol.steps > li { grid-template-columns: 1fr; gap: 12px; }
+    .num { width: 34px; height: 34px; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="eyebrow">Panduan Instalasi</span>
+    <h1>Memasang Aplikasi AppMath</h1>
+    <p class="lede">Panduan langkah demi langkah untuk memasang aplikasi LMS Matematika di komputer Anda. Ditulis dengan bahasa sederhana — tidak perlu paham coding untuk mengikutinya.</p>
+    <div class="meta">
+      <span class="chip">± 30 menit</span>
+      <span class="chip">Tanpa coding</span>
+      <span class="chip">Semua alat gratis</span>
+    </div>
+  </header>
+
+  <hr class="rule">
+
+  <section>
+    <h2>Sebelum mulai</h2>
+    <p class="muted">Siapkan empat hal berikut. Nomor 1 wajib; nomor 2–4 gratis dan hanya butuh daftar dengan email.</p>
+    <ul class="check">
+      <li>
+        <span class="box">✓</span>
+        <span><span class="t">Komputer (Windows atau Mac)</span><span class="d">Yang bisa terhubung internet. Untuk mengelola aplikasi sehari-hari.</span></span>
+      </li>
+      <li>
+        <span class="box">✓</span>
+        <span><span class="t">Akun Supabase — gratis</span><span class="d">Tempat data aplikasi (guru, siswa, nilai, jadwal, foto) disimpan. Daftar di supabase.com.</span></span>
+      </li>
+      <li>
+        <span class="box">✓</span>
+        <span><span class="t">Akun Google AI Studio — gratis</span><span class="d">Untuk fitur koreksi jawaban otomatis. Daftar di aistudio.google.com.</span></span>
+      </li>
+      <li>
+        <span class="box">✓</span>
+        <span><span class="t">Akun Vercel — gratis, opsional</span><span class="d">Hanya kalau aplikasi ingin diakses lewat internet (bukan cuma di komputer sendiri).</span></span>
+      </li>
+    </ul>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>Langkah pemasangan</h2>
+    <p class="muted">Kerjakan berurutan dari langkah 1. Jangan loncat — setiap langkah bergantung pada langkah sebelumnya.</p>
+
+    <ol class="steps">
+      <li>
+        <span class="num">01</span>
+        <div class="step-body">
+          <h3>Unduh kode aplikasi</h3>
+          <p>Minta file aplikasi kepada pengembang (biasanya berbentuk tautan GitHub). Unduh sebagai <strong>ZIP</strong>, lalu ekstrak ke folder yang mudah diingat, misalnya <code>Dokumen/app-math</code>.</p>
+          <div class="callout tip"><span class="ico">💡</span><span>Jangan letakkan di folder yang sering dipindah atau dihapus. Folder ini akan jadi "rumah" aplikasi.</span></div>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">02</span>
+        <div class="step-body">
+          <h3>Pasang Node.js</h3>
+          <p>Buka <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a>, unduh versi <strong>LTS</strong> (tombol kiri), lalu instal seperti aplikasi biasa (Next → Next → Finish).</p>
+          <p class="muted small">Untuk memastikan berhasil: buka Command Prompt (Windows) atau Terminal (Mac), ketik <code>node -v</code> lalu Enter. Kalau muncul angka versi (misalnya <code>v20.x</code>), berarti sudah berhasil.</p>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">03</span>
+        <div class="step-body">
+          <h3>Buat proyek Supabase</h3>
+          <p>Masuk ke <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> → klik <strong>New Project</strong>. Isi nama proyek dan password database (simpan password ini), pilih region <strong>Singapore</strong> agar cepat diakses dari Indonesia, lalu tunggu 1–2 menit.</p>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">04</span>
+        <div class="step-body">
+          <h3>Siapkan database</h3>
+          <p>Ini bagian terpenting. Anda akan menerima <strong>satu file SQL</strong> dari pengembang (nama filenya bisa berbeda, misalnya <code>database.sql</code>).</p>
+          <p class="small">Di dashboard Supabase, buka menu <strong>SQL Editor</strong> → <strong>New Query</strong>. Buka file SQL tersebut, salin <em>seluruh isinya</em>, tempel ke SQL Editor, lalu klik <strong>Run</strong>.</p>
+          <p class="small muted">Kalau file SQL dipecah jadi beberapa bagian, jalankan berurutan dari atas ke bawah.</p>
+          <div class="callout warn"><span class="ico">⚠️</span><span>Jalankan <strong>seluruh isi file sekaligus</strong> tanpa terpotong — kalau sebagian tidak ikut, ada tabel yang tidak terbentuk.</span></div>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">05</span>
+        <div class="step-body">
+          <h3>Buat tempat penyimpanan foto</h3>
+          <p>Di Supabase, buka menu <strong>Storage</strong> → <strong>New bucket</strong>. Isi nama persis: <code>foto</code> (huruf kecil semua), lalu aktifkan pilihan <strong>Public bucket</strong>. Klik Save.</p>
+          <div class="callout warn"><span class="ico">⚠️</span><span>Nama harus tepat <code>foto</code>. Kalau berbeda, foto profil dan lampiran tidak akan tampil.</span></div>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">06</span>
+        <div class="step-body">
+          <h3>Ambil kunci AI</h3>
+          <p>Buka <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → <strong>Create API key</strong> → salin kuncinya (deretan huruf dan angka yang panjang). Simpan sementara di Notepad.</p>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">07</span>
+        <div class="step-body">
+          <h3>Isi file pengaturan</h3>
+          <p>Ambil tiga kunci dari Supabase: buka <strong>Settings</strong> → <strong>API</strong>, catat <strong>Project URL</strong>, <strong>anon public key</strong>, dan <strong>service_role key</strong>.</p>
+          <p>Di dalam folder aplikasi, buat file baru bernama <code>.env.local</code> (gunakan Notepad), lalu isi seperti ini — ganti bagian bertanda <code>...</code> dengan kunci Anda:</p>
+          <pre><code>NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+GEMINI_API_KEY=...</code></pre>
+          <div class="callout warn"><span class="ico">⚠️</span><span>Simpan dengan nama <code>.env.local</code> — bukan <code>.env.local.txt</code>. Di Windows, aktifkan dulu <em>View → File name extensions</em> agar terlihat.</span></div>
+          <div class="callout tip"><span class="ico">🔒</span><span>File ini berisi kunci rahasia. Jangan dibagikan ke siapa pun dan jangan diunggah ke internet.</span></div>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">08</span>
+        <div class="step-body">
+          <h3>Pasang dan jalankan</h3>
+          <p>Buka Command Prompt / Terminal, arahkan ke folder aplikasi, lalu jalankan dua perintah ini satu per satu (yang pertama butuh beberapa menit):</p>
+          <pre><code>npm install
+npm run dev</code></pre>
+          <p>Setelah muncul tulisan <code>Ready</code>, buka browser dan akses <code>http://localhost:3000</code>.</p>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">09</span>
+        <div class="step-body">
+          <h3>Masuk pertama kali</h3>
+          <p>Kalau Anda menjalankan akun contoh di langkah 4c, gunakan salah satu akun berikut (password: <code>password123</code>):</p>
+          <div class="tablewrap" style="margin-top:2px">
+            <table>
+              <thead><tr><th>Peran</th><th>Email</th></tr></thead>
+              <tbody>
+                <tr><td>Admin</td><td><code>admin@gmail.com</code></td></tr>
+                <tr><td>Guru</td><td><code>guru@gmail.com</code></td></tr>
+                <tr><td>Siswa</td><td><code>siswa@gmail.com</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout warn"><span class="ico">⚠️</span><span>Segera ganti password bawaan setelah berhasil masuk — terutama akun admin.</span></div>
+          <p class="muted small">Belum ada akun? Masuk sebagai admin → menu <strong>Kelola User</strong> untuk membuat akun guru dan siswa (email dibuat otomatis oleh aplikasi).</p>
+        </div>
+      </li>
+
+      <li>
+        <span class="num">10</span>
+        <div class="step-body">
+          <h3>Online-kan lewat Vercel — opsional</h3>
+          <p>Agar aplikasi bisa dibuka dari mana saja (bukan hanya komputer Anda): unggah folder aplikasi ke GitHub, lalu di <a href="https://vercel.com" target="_blank" rel="noopener">vercel.com</a> klik <strong>Add New Project</strong> → pilih repositori tadi → isi keempat kunci dari langkah 7 di bagian <strong>Environment Variables</strong> → <strong>Deploy</strong>.</p>
+          <p class="muted small">Setelah selesai, Anda akan mendapat alamat website (misalnya <code>appmath.vercel.app</code>) yang bisa dibagikan ke guru dan siswa.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>Kalau ada masalah</h2>
+    <p class="muted">Sebagian besar kendala di awal pemasangan ada di daftar ini. Cari pesan error yang muncul, lalu ikuti solusinya.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Yang terjadi</th><th>Penyebab &amp; solusi</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Tulisan "relation does not exist" atau data tidak mau muncul</td>
+            <td>Database belum siap. Jalankan ulang file SQL dari Langkah 4 sampai selesai tanpa error.</td>
+          </tr>
+          <tr>
+            <td>"new row violates row-level security policy"</td>
+            <td>Bagian aturan akses (RLS) di file SQL belum ikut jalan. Pastikan <strong>seluruh isi</strong> file SQL dijalankan, bukan sebagian.</td>
+          </tr>
+          <tr>
+            <td>Upload foto gagal atau foto tidak tampil</td>
+            <td>Bucket penyimpanan belum benar. Cek langkah 5 — nama harus <code>foto</code> dan statusnya <strong>Public</strong>.</td>
+          </tr>
+          <tr>
+            <td>Koreksi jawaban otomatis error</td>
+            <td>Kunci AI salah atau kosong. Periksa baris <code>GEMINI_API_KEY</code> di file <code>.env.local</code>, lalu jalankan ulang aplikasi.</td>
+          </tr>
+          <tr>
+            <td>Muncul peringatan "GPS Belum Diaktifkan" terus-menerus</td>
+            <td>Browser memblokir akses lokasi. Klik ikon kunci/gembok di address bar → izinkan <strong>Location</strong> → klik "Coba Lagi".</td>
+          </tr>
+          <tr>
+            <td>"npm tidak dikenali"</td>
+            <td>Node.js belum terpasang. Ulangi langkah 2, lalu tutup dan buka ulang Command Prompt / Terminal.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>Catatan penting</h2>
+    <div class="callout tip"><span class="ico">📌</span><span><strong>Jangan hapus file <code>.env.local</code>.</strong> File itu memegang kunci akses ke database dan AI. Kalau hilang, aplikasi tidak bisa terhubung ke mana pun.</span></div>
+    <div class="callout tip"><span class="ico">💾</span><span><strong>Cadangkan data secara berkala.</strong> Supabase menyediakan fitur backup otomatis di menu Database → Backups.</span></div>
+    <div class="callout tip"><span class="ico">🌐</span><span><strong>Aplikasi ini berjalan di internet</strong>, jadi pastikan komputer yang menjalankannya tetap menyala selama masih dipakai (kecuali sudah dipasang di Vercel).</span></div>
+  </section>
+
+  <footer>
+    <span>Panduan Instalasi AppMath</span>
+    <span>Simpan halaman ini untuk dibuka kembali saat ada kendala.</span>
+  </footer>
+</div>

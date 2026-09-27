@@ -221,13 +221,13 @@ export default function AdminUsers() {
 
     if (activeTab === 'siswa') {
       title = `Daftar Peserta Didik ${filterKelas ? 'Kelas ' + filterKelas + ' ' : ''}Tahun Ajaran ${filterTahun || 'Semua'}`;
-      columns = ['No', 'Nama Siswa', 'NISN', 'No. Telp', 'Nama Wali', 'Alamat'];
-      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.nisn || '-', u.nomor_hp || '-', u.nama_wali || '-', u.alamat || '-']);
+      columns = ['No', 'Nama Siswa', 'Email', 'NISN', 'No. Telp', 'Nama Wali', 'Alamat'];
+      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.email || '-', u.nisn || '-', u.nomor_hp || '-', u.nama_wali || '-', u.alamat || '-']);
       filename = 'daftar-peserta-didik.pdf';
     } else if (activeTab === 'guru') {
       title = `Daftar Guru Matematika Tahun Ajaran ${filterTahun || 'Semua'}`;
-      columns = ['No', 'Nama Guru', 'Kelas yang Diampu'];
-      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.detail_kelas || '-']);
+      columns = ['No', 'Nama Guru', 'Email', 'Kelas yang Diampu'];
+      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.email || '-', u.detail_kelas || '-']);
       filename = 'daftar-guru.pdf';
     } else {
       title = 'Daftar Admin';
@@ -311,6 +311,7 @@ export default function AdminUsers() {
                   <tr>
                     <th>No</th>
                     <th>Nama Siswa</th>
+                    <th>Email</th>
                     <th>NISN</th>
                     <th>Kelas</th>
                     <th>No. Telp</th>
@@ -323,6 +324,7 @@ export default function AdminUsers() {
                   <tr>
                     <th>No</th>
                     <th>Nama Guru</th>
+                    <th>Email</th>
                     <th>Kelas yg Diampu</th>
                     <th>No. Telp</th>
                     <th>Aksi</th>
@@ -345,6 +347,7 @@ export default function AdminUsers() {
                     
                     {activeTab === 'siswa' && (
                       <>
+                        <td>{user.email || '-'}</td>
                         <td>{user.nisn || '-'}</td>
                         <td>{user.detail_kelas}</td>
                         <td>{user.nomor_hp || '-'}</td>
@@ -355,6 +358,7 @@ export default function AdminUsers() {
 
                     {activeTab === 'guru' && (
                       <>
+                        <td>{user.email || '-'}</td>
                         <td>{user.detail_kelas}</td>
                         <td>{user.nomor_hp || '-'}</td>
                       </>

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
+import { generateKopPdf } from '@/lib/pdf';
 
 export default function AdminJadwal() {
   const [loading, setLoading] = useState(true);
@@ -128,6 +129,23 @@ export default function AdminJadwal() {
     fetchData();
   };
 
+  const handleExportPDF = async () => {
+    const columns = ['Waktu', ...days];
+    const rows = timeSlots.map((slot: any) => [
+      slot.label,
+      ...days.map((day: string) => {
+        const entries = jadwals.filter((j: any) => j.hari === day && j.slot === slot.label);
+        if (entries.length === 0) return '-';
+        return entries.map((j: any) => {
+          const guru = gurus.find((g: any) => g.id === j.guru_id)?.nama || '';
+          const kls = kelas.find((k: any) => k.id === j.kelas_id)?.nama || '';
+          return `${kls} - ${guru}`;
+        }).join('\n');
+      })
+    ]);
+    await generateKopPdf({ title: 'Jadwal Pelajaran', columns, rows, filename: 'jadwal-pelajaran.pdf' });
+  };
+
   const handleGenerate = async () => {
     setGenerating(true);
 
@@ -241,7 +259,7 @@ export default function AdminJadwal() {
             <p className="text-muted m-0">Atur jadwal guru mengajar agar tidak bentrok.</p>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button className="btn btn-secondary" onClick={() => window.print()}>📄 Download / Print PDF</button>
+            <button className="btn btn-secondary" onClick={handleExportPDF}>📄 Download / Print PDF</button>
             <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
               {generating ? 'Memproses...' : '✨ Generate Otomatis'}
             </button>
@@ -338,14 +356,6 @@ export default function AdminJadwal() {
             left: 0;
             top: 0;
             width: 100%;
-          }
-          .print-section::before {
-            content: "JADWAL PELAJARAN EDUSCHOOL";
-            display: block;
-            font-size: 24px;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 20px;
           }
           .print-hide { display: none !important; }
           .sidebar, .topbar { display: none !important; }

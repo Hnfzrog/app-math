@@ -18,6 +18,7 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
   const pathname = usePathname();
   const [displayName, setDisplayName] = useState(userNameProp);
   const [fotoProfil, setFotoProfil] = useState<string | null>(null);
+  const [namaSekolah, setNamaSekolah] = useState('EduSchool');
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
@@ -41,6 +42,13 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
     fetchName();
     window.addEventListener('focus', fetchName);
     return () => window.removeEventListener('focus', fetchName);
+  }, []);
+
+  // Nama sekolah (dari master pengaturan) — dipakai di sidebar & breadcrumb
+  useEffect(() => {
+    supabase.from('pengaturan').select('nama_sekolah').limit(1).single().then(({ data }) => {
+      if (data?.nama_sekolah) setNamaSekolah(data.nama_sekolah);
+    });
   }, []);
 
   // Fetch notifikasi (unread badge count) dari DB
@@ -152,7 +160,7 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
             <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
             <path d="M6 12v5c3 3 9 3 12 0v-5"/>
           </svg>
-          <span>EduSchool LMS</span>
+          <span>{namaSekolah}</span>
         </div>
 
         <div className="sidebar-user">
@@ -213,7 +221,7 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
             </button>
             <div>
               <h2>{pageTitle}</h2>
-              <div className="breadcrumb">EduSchool / {role} / {pageTitle}</div>
+              <div className="breadcrumb">{namaSekolah} / {role} / {pageTitle}</div>
             </div>
           </div>
 
