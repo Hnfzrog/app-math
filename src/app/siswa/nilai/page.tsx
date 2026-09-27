@@ -11,6 +11,7 @@ export default function SiswaNilai() {
   const [allBabDone, setAllBabDone] = useState(false);
   const [namaSiswa, setNamaSiswa] = useState('');
   const [kelasNama, setKelasNama] = useState('');
+  const [ujianList, setUjianList] = useState<any[]>([]);
 
   const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
@@ -54,11 +55,72 @@ export default function SiswaNilai() {
       const map: Record<string, any> = {};
       (data || []).forEach(n => { map[n.bab_id] = n; });
       setNilaiMap(map);
+
+      // 3. Ujian UTS/UAS siswa (skor rata-rata) — UH sudah masuk ke nilai per-bab.
+      await fetchUjianSiswa(kelasId);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchUjianSiswa = async (kelasId: string | null) => {
+    if (!kelasId) {
+      setUjianList([]);
+      return;
+    }
+
+    const { data: ujianSiswa } = await supabase
+      .from('ujian')
+      .select('id, jenis, deskripsi')
+      .eq('kelas_id', kelasId)
+      .eq('is_terbit', true)
+      .neq('jenis', 'UH')
+      .order('created_at', { ascending: false });
+
+    const examIds = (ujianSiswa || []).map((x: any) => x.id);
+    if (examIds.length === 0) {
+      setUjianList([]);
+      return;
+    }
+
+    const { data: soalU } = await supabase
+      .from('soal_ujian')
+      .select('id, ujian_id')
+      .in('ujian_id', examIds);
+
+    const soalIds = (soalU || []).map((s: any) => s.id);
+    const { data: jwU } = await supabase
+      .from('jawaban_ujian')
+      .select('soal_id, skor_ai, skor_final, status')
+      .eq('siswa_id', SISWA_ID)
+      .in('soal_id', soalIds);
+
+    const jawabanBySoal: Record<string, any> = {};
+    (jwU || []).forEach((j: any) => { jawabanBySoal[j.soal_id] = j; });
+
+    const rows = (ujianSiswa || []).map((ujian: any) => {
+      const soalExam = (soalU || []).filter((s: any) => s.ujian_id === ujian.id);
+      const dijawab = soalExam
+        .map((s: any) => jawabanBySoal[s.id])
+        .filter(Boolean);
+      const skors = dijawab.map((j: any) => Number(j.skor_final ?? j.skor_ai ?? 0));
+      const semuaFinal = soalExam.length > 0 && soalExam.every((s: any) => jawabanBySoal[s.id]?.status === 'final');
+
+      return {
+        id: ujian.id,
+        jenis: ujian.jenis,
+        deskripsi: ujian.deskripsi,
+        sudah: dijawab.length > 0,
+        skor: skors.length > 0
+          ? Math.round((skors.reduce((a, b) => a + b, 0) / skors.length) * 100) / 100
+          : null,
+        final: semuaFinal,
+      };
+    });
+
+    setUjianList(rows);
   };
 
   // e-Rapor tersedia otomatis jika semua bab sudah dinilai
@@ -159,6 +221,42 @@ export default function SiswaNilai() {
           </div>
         )}
       </div>
+
+      {ujianList.length > 0 && (
+        <div className="card card-body mt-4">
+          <h4 className="mb-3">Ujian UTS / UAS</h4>
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Jenis</th>
+                  <th>Deskripsi</th>
+                  <th>Skor</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ujianList.map(u => (
+                  <tr key={u.id}>
+                    <td>{u.jenis}</td>
+                    <td>{u.deskripsi}</td>
+                    <td>{u.skor != null ? u.skor : '-'}</td>
+                    <td>
+                      {!u.sudah ? (
+                        <span className="badge badge-secondary">Belum dikerjakan</span>
+                      ) : u.final ? (
+                        <span className="badge badge-success">Sudah divalidasi</span>
+                      ) : (
+                        <span className="badge badge-warning">Menunggu validasi</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

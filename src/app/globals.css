@@ -723,6 +723,162 @@ input, select, textarea {
   margin-bottom: 1.5rem;
 }
 
+/* Layout ujian: navigator nomor di KIRI, area soal di kanan.
+   Pakai kelas (bukan inline style) supaya media query di bawah bisa menumpuknya di layar kecil. */
+.exam-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 900px);
+  gap: 1.5rem;
+  align-items: start;
+  /* Batasi lebar area soal dan ratakan di tengah agar tidak membentang di layar lebar. */
+  justify-content: center;
+}
+
+/* Header halaman ujian siswa — sticky + berbingkai */
+.exam-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  background: var(--white);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1rem;
+  margin-bottom: 1.25rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* Kotak keterangan (peraturan ujian, pakta integritas, jadwal) */
+.exam-info-box {
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* Kartu tengah untuk layar Peraturan & Pakta Integritas */
+.exam-sheet {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Tombol selebar panel */
+.btn-block {
+  width: 100%;
+  display: block;
+}
+
+/* Penanda status soal di navigasi */
+.nav-soal-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.nav-soal {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+  background: var(--slate-200);
+  color: var(--slate-600);
+}
+.nav-soal:hover { filter: brightness(0.96); }
+/* Abu-abu = belum dikerjakan (default di atas) */
+.nav-soal.dikerjakan {
+  background: var(--success-light);
+  color: var(--success);
+  border-color: var(--success);
+}
+/* Merah = siswa menandai soal ini untuk dicek ulang */
+.nav-soal.ditandai {
+  background: var(--danger-light);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+/* Soal yang sedang dibuka — tetap terlihat walau nomornya berwarna */
+.nav-soal.aktif {
+  box-shadow: 0 0 0 3px var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.nav-soal.dikerjakan.aktif,
+.nav-soal.ditandai.aktif { color: inherit; }
+.nav-soal.dikerjakan.aktif { color: var(--success); }
+.nav-soal.ditandai.aktif { color: var(--danger); }
+
+/* Keterangan warna di panel navigasi */
+.legend-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+.legend-dot.belum { background: var(--slate-200); }
+.legend-dot.dikerjakan { background: var(--success-light); border-color: var(--success); }
+.legend-dot.ditandai { background: var(--danger-light); border-color: var(--danger); }
+
+/* Daftar nomor soal yang perlu perhatian di modal konfirmasi submit */
+.nomor-tautan {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.nomor-tautan:hover { border-color: var(--primary); color: var(--primary); }
+.nomor-tautan.belum { background: var(--slate-100); color: var(--slate-600); }
+.nomor-tautan.ditandai { background: var(--danger-light); color: var(--danger); border-color: var(--danger); }
+
+/* ================= 4b. ACCORDION ================= */
+.accordion {
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  background: var(--white);
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+.accordion > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.9rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--slate-50);
+  transition: var(--transition);
+}
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary:hover { background: var(--slate-100); }
+.accordion[open] > summary { border-bottom: 1px solid var(--slate-200); }
+.accordion-chevron {
+  margin-left: auto;
+  color: var(--slate-500);
+  transition: transform 0.2s ease;
+}
+.accordion[open] .accordion-chevron { transform: rotate(90deg); }
+.accordion-body { padding: 1rem; }
+
 /* ================= 4. MODALS ================= */
 .modal-overlay {
   position: fixed;
@@ -844,7 +1000,7 @@ input, select, textarea {
     align-items: center;
     justify-content: center;
   }
-  .grid-2, .grid-3 {
+  .grid-2, .grid-3, .exam-layout {
     grid-template-columns: 1fr;
   }
   .main-body {

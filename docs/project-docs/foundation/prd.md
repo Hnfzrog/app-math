@@ -41,8 +41,8 @@ The application serves three distinct roles: Admin, Guru, and Siswa. The platfor
 1. **Dashboard**: Greeting, Notif badge, Stats (Siswa, Kelas), achievement chart, and today's schedule reminder.
 2. **Profile**: Edit password, address, phone. Photo upload is PENDING.
 3. **Kelas Saya**: Manage materials, tasks, LKPD with deadlines.
-4. **Ujian**: Create UH/UTS/UAS with descriptions, durations, and question counts.
-5. **Presensi**: Validate attendance submitted by Siswa. Export PDF.
+4. **Ujian**: Create UH/UTS/UAS with descriptions, durations, and question counts. **Mandatory open/close schedule** (date + time) and a **Publish** toggle — a draft exam is invisible to students. Exams can be edited afterwards (schedule, type, description, duration); the class cannot be changed after creation.
+5. **Presensi**: Validate attendance submitted by Siswa, **plus manual entry** — record attendance for one student or a whole class at once, with a photo taken directly from the camera. Export PDF.
 6. **Penilaian**: 
    - Tunggal: Verify answers, give text feedback (upload photo PENDING). Auto grade: `(Score * 0.9) + (Attendance * 0.1)`.
    - Menyeluruh: Class average table for all chapters.
@@ -50,9 +50,9 @@ The application serves three distinct roles: Admin, Guru, and Siswa. The platfor
 ## Features: Siswa
 1. **Dashboard**: Greeting, Notif badge, Stats (Materi, LKPD, Tugas, Ujian), chart, today's schedule, "What's New".
 2. **Profile**: Update phone, guardian name, address. Photo upload is PENDING.
-3. **Presensi Mandiri**: Automatic geolocation attendance (within 50m radius). Direct camera photo is PENDING.
+3. **Presensi Mandiri**: Automatic geolocation attendance (radius from `pengaturan.radius_meter`). Direct camera photo is implemented via `CameraCapture`.
 4. **Kelas Saya**: View class info, classmates, Forum Belajar per chapter. Image answers upload is PENDING.
-5. **Ujian**: View rules -> Sign Pakta Integritas -> Exam UI with timer and navigator. Upload photo answer is PENDING.
+5. **Ujian**: Only published exams appear, each showing its open/close schedule and a status badge (Belum Dibuka / Berlangsung / Ditutup). The schedule gates entry only — once started, the duration timer governs. Flow: View rules (with schedule) -> Sign Pakta Integritas -> Exam UI with timer and navigator.
 6. **Nilai Saya**: View grades and teacher feedback. Auto-generate e-Rapor PDF when all chapters are done.
 
 ## Gap Closure — Completeness Pass (27 Sep 2026)
@@ -83,6 +83,22 @@ Decisions approved 27 Sep 2026 after a full code audit. Photos are **DEFERRED** 
 21. **Forum Belajar** — visible to guru too.
 22. **Helpdesk (siswa)** — floating call-center button bottom-right.
 23. **Hygiene** — remove hardcoded log path in `delete-user/route.ts`; rename `Website%20Design.md` → `Website Design.md`.
+
+### Ujian: Pilgan, Auto-Nilai, Validasi Guru (28 Sep 2026)
+
+Scope approved 28 Sep 2026.
+
+**Guru**
+1. **Kelola Soal** — pilih tipe soal per butir: **Pilgan** (2+ opsi, kunci boleh lebih dari satu = multi-jawaban) atau **Esai** (dengan kunci/rubrik sebagai acuan AI). Kunci disimpan di tabel `soal_ujian_kunci` yang tidak terbaca siswa.
+2. **Ambil Soal dari Ujian Lain** — salin (snapshot) soal dari ujian mana pun di sekolah, termasuk milik guru lain. Kunci ikut tersalin lewat route server-side sehingga auto-nilai pilgan tetap jalan; hasil salinan bisa diedit bebas.
+3. **Hasil Ujian** (`/guru/ujian/[id]/hasil`) — accordion **per siswa, default tertutup**; lihat jawaban tiap soal, skor AI untuk esai, edit `skor_final`, lalu validasi satu siswa atau **validasi massal** beberapa siswa sekaligus.
+
+**Siswa**
+4. **Ujian** — soal pilgan dirender sebagai radio (satu jawaban) / checkbox (multi-jawaban). Pilgan langsung tampil benar/salah setelah submit; esai menampilkan "menunggu validasi guru" sampai guru memvalidasi.
+5. **Navigasi soal di kiri** dengan penanda warna: abu-abu = belum dikerjakan, hijau = sudah dikerjakan, merah = ditandai untuk dicek ulang. Tiap nomor bisa diklik untuk lompat ke soal.
+6. **Modal konfirmasi submit** menolak pengumpulan selama masih ada soal terlewat atau masih bertanda; daftar nomornya bisa diklik untuk lompat ke soal tersebut. (Auto-submit saat waktu habis tetap mengirim apa adanya.)
+
+**Non-goal**: skor ujian tidak otomatis masuk tabel `nilai`/e-Rapor; unduh soal sebagai file; ambil soal dari Bank Soal.
 
 ### Deferred (photo — awaiting storage bucket)
 - Upload wiring for `foto_profil_url`, `presensi.foto_url`, `jawaban_ujian.foto_url`, `umpan_balik_foto_url`.

@@ -4,7 +4,32 @@ import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { generateKopPdf } from '@/lib/pdf';
-import { fileUrl } from '@/lib/uploadClient';
+import { fileUrl, uploadImage } from '@/lib/uploadClient';
+import CameraCapture from '@/components/CameraCapture';
+
+// Nilai status yang sah menurut CHECK constraint di DB: masuk / izin / sakit / alpha.
+// (Sebelumnya kode memakai 'hadir' yang ditolak constraint, sehingga presensi tidak pernah tersimpan.)
+const STATUS_PRESENSI = [
+  { value: 'masuk', label: 'Hadir (Masuk)' },
+  { value: 'izin', label: 'Izin' },
+  { value: 'sakit', label: 'Sakit' },
+  { value: 'alpha', label: 'Alpha (Tanpa Keterangan)' },
+];
+
+const badgeStatus = (status: string) => {
+  switch (status) {
+    case 'masuk': return 'badge-success';
+    case 'izin': return 'badge-primary';
+    case 'sakit': return 'badge-warning';
+    case 'alpha': return 'badge-danger';
+    default: return 'badge-secondary';
+  }
+};
+
+const labelStatus = (status: string) =>
+  STATUS_PRESENSI.find(s => s.value === status)?.label || status;
+
+const todayISO = () => new Date().toISOString().split('T')[0];
 
 export default function GuruPresensi() {
   const { userId, loading: userLoading } = useCurrentUser();
@@ -17,6 +42,18 @@ export default function GuruPresensi() {
   const [showModal, setShowModal] = useState(false);
   const [selectedPresensi, setSelectedPresensi] = useState<any>(null);
   const [feedback, setFeedback] = useState('');
+
+  // Input presensi manual (per siswa / sekelas sekaligus)
+  const [showManual, setShowManual] = useState(false);
+  const [manualKelas, setManualKelas] = useState('');
+  const [manualMode, setManualMode] = useState<'kelas' | 'siswa'>('kelas');
+  const [siswaKelasList, setSiswaKelasList] = useState<any[]>([]);
+  const [statusPerSiswa, setStatusPerSiswa] = useState<Record<string, string>>({});
+  const [manualSiswaId, setManualSiswaId] = useState('');
+  const [manualStatus, setManualStatus] = useState('masuk');
+  const [manualFoto, setManualFoto] = useState<File | null>(null);
+  const [loadingSiswa, setLoadingSiswa] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -91,6 +128,127 @@ export default function GuruPresensi() {
     setShowModal(true);
   };
 
+  const resetModalManual = () => {
+    setManualMode('kelas');
+    setSiswaKelasList([]);
+    setStatusPerSiswa({});
+    setManualSiswaId('');
+    setManualStatus('masuk');
+    setManualFoto(null);
+  };
+
+  const bukaModalManual = () => {
+    resetModalManual();
+    setManualKelas(filterKelas || '');
+    setShowManual(true);
+    if (filterKelas) muatSiswaKelas(filterKelas);
+  };
+
+  // Ambil siswa kelas + presensi hari ini, supaya siswa yang sudah tercatat bisa ditandai
+  // dan dilewati — inilah yang mencegah baris presensi ganda di hari yang sama.
+  const muatSiswaKelas = async (kelasId: string) => {
+    if (!kelasId) {
+      setSiswaKelasList([]);
+      setStatusPerSiswa({});
+      return;
+    }
+
+    setLoadingSiswa(true);
+    setManualFoto(null);
+
+    const { data: siswaData } = await supabase
+      .from('siswa_kelas')
+      .select('siswa_id, users(nama, nisn)')
+      .eq('kelas_id', kelasId);
+
+    const { data: presensiHariIni } = await supabase
+      .from('presensi')
+      .select('siswa_id')
+      .eq('kelas_id', kelasId)
+      .eq('tanggal', todayISO());
+
+    const sudahPresensi = new Set((presensiHariIni || []).map((p: any) => p.siswa_id));
+
+    const list = (siswaData || [])
+      .map((s: any) => ({
+        id: s.siswa_id,
+        nama: s.users?.nama || '(tanpa nama)',
+        nisn: s.users?.nisn || '',
+        sudahPresensi: sudahPresensi.has(s.siswa_id),
+      }))
+      .sort((a: any, b: any) => a.nama.localeCompare(b.nama));
+
+    // Default semua 'masuk'; guru cukup mengubah pengecualiannya.
+    const defaultStatus: Record<string, string> = {};
+    list.forEach((s: any) => { if (!s.sudahPresensi) defaultStatus[s.id] = 'masuk'; });
+
+    setSiswaKelasList(list);
+    setStatusPerSiswa(defaultStatus);
+    setManualSiswaId(list.find((s: any) => !s.sudahPresensi)?.id || '');
+    setLoadingSiswa(false);
+  };
+
+  const handleSimpanManual = async () => {
+    if (!manualKelas) {
+      customAlert('Pilih kelas terlebih dahulu.', true);
+      return;
+    }
+    if (!manualFoto) {
+      customAlert('Foto presensi wajib diambil langsung dari kamera.', true);
+      return;
+    }
+    if (manualMode === 'siswa' && !manualSiswaId) {
+      customAlert('Pilih siswa terlebih dahulu.', true);
+      return;
+    }
+
+    const target = manualMode === 'siswa'
+      ? siswaKelasList.filter(s => s.id === manualSiswaId && !s.sudahPresensi)
+      : siswaKelasList.filter(s => !s.sudahPresensi);
+
+    if (target.length === 0) {
+      customAlert(
+        manualMode === 'siswa'
+          ? 'Siswa ini sudah presensi hari ini.'
+          : 'Semua siswa di kelas ini sudah presensi hari ini.',
+        true
+      );
+      return;
+    }
+
+    setSavingManual(true);
+    try {
+      const fotoUrl = await uploadImage(manualFoto, 'presensi');
+      const tanggal = todayISO();
+
+      const rows = target.map(s => ({
+        siswa_id: s.id,
+        kelas_id: manualKelas,
+        tanggal,
+        status: manualMode === 'siswa' ? manualStatus : (statusPerSiswa[s.id] || 'masuk'),
+        // Satu foto bukti dipakai untuk semua baris pada mode sekelas — cukup satu kali upload.
+        foto_url: fotoUrl,
+        // Diinput guru sendiri, jadi tidak perlu dia validasi lagi.
+        status_validasi: 'valid',
+      }));
+
+      const { error } = await supabase.from('presensi').insert(rows);
+      if (error) {
+        customAlert('Gagal menyimpan presensi: ' + error.message, true);
+        setSavingManual(false);
+        return;
+      }
+
+      setShowManual(false);
+      resetModalManual();
+      fetchPresensi();
+      customAlert(`${rows.length} presensi berhasil disimpan.`, false);
+    } catch (err: any) {
+      customAlert('Gagal upload foto: ' + (err?.message || err), true);
+    }
+    setSavingManual(false);
+  };
+
   const handleExportPDF = async () => {
     const kelasNama = filterKelas ? (kelasList.find(k => k.id === filterKelas)?.nama || '') : '';
     const title = `Daftar Presensi Siswa ${filterKelas ? 'Kelas ' + kelasNama + ' ' : ''}`;
@@ -116,7 +274,10 @@ export default function GuruPresensi() {
           <h2 style={{ margin: 0 }}>Validasi Presensi GPS</h2>
           <p className="text-muted" style={{ margin: '4px 0 0' }}>Validasi kehadiran siswa (Radius 50m).</p>
         </div>
-        <button onClick={handleExportPDF} className="btn btn-primary">Export PDF</button>
+        <div className="d-flex gap-2">
+          <button onClick={bukaModalManual} className="btn btn-outline">Input Presensi Manual</button>
+          <button onClick={handleExportPDF} className="btn btn-primary">Export PDF</button>
+        </div>
       </div>
 
       <div className="card card-body mb-4 hide-on-print">
@@ -165,8 +326,8 @@ export default function GuruPresensi() {
                     </td>
                     <td>{p.kelas?.nama}</td>
                     <td>
-                      <span className={`badge ${p.status === 'hadir' ? 'badge-primary' : (p.status === 'izin' ? 'badge-info' : (p.status === 'sakit' ? 'badge-warning' : 'badge-danger'))}`}>
-                        {p.status.toUpperCase()}
+                      <span className={`badge ${badgeStatus(p.status)}`}>
+                        {labelStatus(p.status)}
                       </span>
                     </td>
                     <td>
@@ -244,6 +405,164 @@ export default function GuruPresensi() {
               <div className="d-flex justify-between mt-4">
                 <button className="btn btn-danger" onClick={() => handleValidasi('invalid')}>Tolak (Invalid)</button>
                 <button className="btn btn-primary" onClick={() => handleValidasi('valid')}>Terima (Valid)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Input Presensi Manual */}
+      {showManual && (
+        <div className="modal-overlay hide-on-print">
+          <div className="modal-dialog" style={{ maxWidth: '640px' }}>
+            <div className="modal-header">
+              <h3>Input Presensi Manual</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setShowManual(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Kelas</label>
+                <select
+                  className="form-control"
+                  value={manualKelas}
+                  onChange={e => { setManualKelas(e.target.value); muatSiswaKelas(e.target.value); }}
+                >
+                  <option value="">Pilih kelas...</option>
+                  {kelasList.map(k => (
+                    <option key={k.id} value={k.id}>{k.nama}</option>
+                  ))}
+                </select>
+              </div>
+
+              {manualKelas && (
+                <div className="form-group mt-3">
+                  <label>Mode Input</label>
+                  <div className="d-flex gap-2">
+                    <button
+                      type="button"
+                      className={`btn ${manualMode === 'kelas' ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setManualMode('kelas')}
+                    >
+                      Sekelas Sekaligus
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${manualMode === 'siswa' ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setManualMode('siswa')}
+                    >
+                      Per Siswa
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {manualKelas && (
+                loadingSiswa ? (
+                  <p className="text-center my-3">Memuat siswa...</p>
+                ) : siswaKelasList.length === 0 ? (
+                  <p className="text-muted my-3">Belum ada siswa di kelas ini.</p>
+                ) : manualMode === 'siswa' ? (
+                  <>
+                    <div className="form-group mt-3">
+                      <label>Siswa</label>
+                      <select
+                        className="form-control"
+                        value={manualSiswaId}
+                        onChange={e => setManualSiswaId(e.target.value)}
+                      >
+                        <option value="">Pilih siswa...</option>
+                        {siswaKelasList.map(s => (
+                          <option key={s.id} value={s.id} disabled={s.sudahPresensi}>
+                            {s.nama}{s.sudahPresensi ? ' — sudah presensi hari ini' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group mt-3">
+                      <label>Status Kehadiran</label>
+                      <select
+                        className="form-control"
+                        value={manualStatus}
+                        onChange={e => setManualStatus(e.target.value)}
+                      >
+                        {STATUS_PRESENSI.map(s => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3">
+                    <p className="text-muted" style={{ fontSize: '13px' }}>
+                      Semua siswa default <strong>Hadir (Masuk)</strong>. Ubah hanya yang izin/sakit/alpha.
+                      Siswa yang sudah presensi hari ini dikunci agar tidak tercatat dua kali.
+                    </p>
+                    <div style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--slate-200)', borderRadius: 'var(--radius-md)' }}>
+                      <table className="table" style={{ margin: 0 }}>
+                        <thead>
+                          <tr>
+                            <th>Nama Siswa</th>
+                            <th style={{ width: '190px' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {siswaKelasList.map(s => (
+                            <tr key={s.id}>
+                              <td>
+                                <strong>{s.nama}</strong><br />
+                                <small className="text-muted">{s.nisn || '-'}</small>
+                              </td>
+                              <td>
+                                {s.sudahPresensi ? (
+                                  <span className="badge badge-secondary">Sudah presensi</span>
+                                ) : (
+                                  <select
+                                    className="form-control"
+                                    value={statusPerSiswa[s.id] || 'masuk'}
+                                    onChange={e => setStatusPerSiswa(prev => ({ ...prev, [s.id]: e.target.value }))}
+                                  >
+                                    {STATUS_PRESENSI.map(o => (
+                                      <option key={o.value} value={o.value}>{o.label}</option>
+                                    ))}
+                                  </select>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {manualKelas && !loadingSiswa && siswaKelasList.length > 0 && (
+                <div className="form-group mt-3">
+                  <label>Foto Presensi (Wajib, dari kamera)</label>
+                  <CameraCapture onCapture={setManualFoto} />
+                  <small className="text-muted">
+                    {manualMode === 'kelas'
+                      ? 'Satu foto ini dipakai sebagai bukti untuk semua siswa yang disimpan.'
+                      : 'Foto diambil langsung dari kamera, lalu dikompres otomatis.'}
+                  </small>
+                </div>
+              )}
+
+              <div className="d-flex justify-between mt-4">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowManual(false)}>Batal</button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleSimpanManual}
+                  disabled={savingManual || !manualFoto || !manualKelas}
+                >
+                  {savingManual
+                    ? 'Menyimpan...'
+                    : manualMode === 'kelas'
+                      ? `Simpan ${siswaKelasList.filter(s => !s.sudahPresensi).length} Siswa`
+                      : 'Simpan Presensi'}
+                </button>
               </div>
             </div>
           </div>

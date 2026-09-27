@@ -382,7 +382,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS trg_notif_konten ON public.konten;
 CREATE TRIGGER trg_notif_konten AFTER INSERT ON public.konten FOR EACH ROW EXECUTE FUNCTION public.notif_konten_baru();
@@ -396,7 +396,7 @@ BEGIN
   FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS trg_notif_ujian ON public.ujian;
 CREATE TRIGGER trg_notif_ujian AFTER INSERT ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_baru();
@@ -409,7 +409,7 @@ BEGIN
   VALUES (NEW.siswa_id, 'Guru telah memberi nilai/umpan balik untuk salah satu bab.');
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS trg_notif_nilai ON public.nilai;
 CREATE TRIGGER trg_notif_nilai AFTER INSERT ON public.nilai FOR EACH ROW EXECUTE FUNCTION public.notif_nilai_baru();
@@ -424,8 +424,108 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS trg_notif_laporan ON public.laporan;
 CREATE TRIGGER trg_notif_laporan AFTER UPDATE ON public.laporan FOR EACH ROW EXECUTE FUNCTION public.notif_laporan_selesai();
+
+-- 31. UJIAN: soal pilihan ganda + penilaian & validasi guru
+-- Tipe soal: 'pg' (pilihan ganda) mengikuti konvensi tabel `soal`, 'uraian' = esai.
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS tipe text NOT NULL DEFAULT 'uraian'
+  CHECK (tipe IN ('pg', 'uraian'));
+-- Daftar opsi pg: ["opsi A", "opsi B", ...] — hanya dipakai saat tipe = 'pg'.
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS opsi jsonb;
+-- Soal pg dengan lebih dari satu jawaban benar. Disimpan eksplisit karena siswa tidak boleh
+-- tahu isi kunci, jadi jumlah jawaban benar tidak bisa diturunkan di sisi client.
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS multi_jawaban boolean NOT NULL DEFAULT false;
+
+-- Kunci jawaban dipisah dari soal_ujian karena policy baca soal_ujian terbuka untuk guru.
+-- soal_ujian_kunci hanya bisa dibaca guru pemilik ujian; siswa tidak punya akses sama sekali.
+CREATE TABLE IF NOT EXISTS public.soal_ujian_kunci (
+  soal_id uuid PRIMARY KEY REFERENCES public.soal_ujian ON DELETE CASCADE,
+  -- pg: JSON array teks opsi benar (format sama dengan soal.kunci_jawaban); uraian: kunci/rubrik.
+  kunci_jawaban text NOT NULL,
+  pembahasan text,
+  created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Penilaian otomatis (pg) / bantuan AI (uraian) + validasi akhir oleh guru.
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS skor_ai numeric;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS feedback_ai text;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS skor_final numeric;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS dinilai_at timestamptz;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending_verifikasi'
+  CHECK (status IN ('pending_verifikasi', 'final'));
+
+ALTER TABLE public.soal_ujian_kunci ENABLE ROW LEVEL SECURITY;
+
+-- 31a. Guru memvalidasi jawaban ujian → notif ke siswa (badge notifikasi).
+CREATE OR REPLACE FUNCTION public.notif_ujian_divalidasi()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.status = 'final' AND OLD.status IS DISTINCT FROM 'final' THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    VALUES (NEW.siswa_id, 'Nilaimu sudah keluar! Guru telah memvalidasi jawaban ujianmu.');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_divalidasi ON public.jawaban_ujian;
+CREATE TRIGGER trg_notif_ujian_divalidasi AFTER UPDATE ON public.jawaban_ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_divalidasi();
+
+-- 32. UJIAN: jadwal buka/tutup + status terbit
+-- Kolom jadwal sengaja nullable: ujian lama belum punya jadwal, sehingga NOT NULL akan
+-- menggagalkan migrasi. Aturan "wajib diisi" ditegakkan di form guru, dan constraint di
+-- bawah memastikan tidak ada ujian terbit tanpa jadwal lengkap.
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS mulai_at timestamptz;
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS selesai_at timestamptz;
+-- Ujian baru & lama default DRAF — siswa tidak melihatnya sampai guru menerbitkan.
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS is_terbit boolean NOT NULL DEFAULT false;
+
+-- Terbit hanya sah kalau jadwalnya lengkap dan masuk akal. Baris lama (is_terbit = false)
+-- otomatis lolos, jadi constraint ini aman dipasang di tabel yang sudah berisi data.
+ALTER TABLE public.ujian DROP CONSTRAINT IF EXISTS ujian_jadwal_check;
+ALTER TABLE public.ujian ADD CONSTRAINT ujian_jadwal_check CHECK (
+  NOT is_terbit OR (mulai_at IS NOT NULL AND selesai_at IS NOT NULL AND selesai_at > mulai_at)
+);
+
+-- 32a. Notif ujian ke siswa HANYA saat ujian benar-benar terbit.
+-- Menggantikan trg_notif_ujian (section 30b) yang menembak saat INSERT — dengan konsep
+-- draf, itu akan memberitahu siswa tentang ujian yang belum bisa mereka buka.
+DROP TRIGGER IF EXISTS trg_notif_ujian ON public.ujian;
+
+-- Dipisah INSERT vs UPDATE karena OLD tidak boleh direferensikan di trigger INSERT.
+CREATE OR REPLACE FUNCTION public.notif_ujian_terbit_insert()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_terbit THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Ujian baru (' || NEW.jenis || ') sudah dibuka untuk kelas Anda.'
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION public.notif_ujian_terbit_update()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_terbit AND NOT OLD.is_terbit THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Ujian baru (' || NEW.jenis || ') sudah dibuka untuk kelas Anda.'
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_terbit_ins ON public.ujian;
+CREATE TRIGGER trg_notif_ujian_terbit_ins AFTER INSERT ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_terbit_insert();
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_terbit_upd ON public.ujian;
+CREATE TRIGGER trg_notif_ujian_terbit_upd AFTER UPDATE ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_terbit_update();
+
+-- 33. UJIAN: hubungkan ke bab — UH masuk ke nilai per-bab (skor_benar); UTS/UAS bab_id = NULL.
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS bab_id uuid REFERENCES public.bab ON DELETE SET NULL;
 

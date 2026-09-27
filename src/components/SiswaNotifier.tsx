@@ -119,9 +119,35 @@ export default function SiswaNotifier() {
       )
       .subscribe();
 
+    // Subscribe ke validasi nilai ujian (tabel jawaban_ujian)
+    const ujianChannel = supabase.channel('ujian-nilai-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jawaban_ujian',
+          filter: `siswa_id=eq.${SISWA_ID}` // Hanya notif jika siswa ini yang divalidasi
+        },
+        (payload) => {
+          const newData = payload.new;
+          const oldData = payload.old;
+
+          // Status berubah menjadi final = guru baru selesai memvalidasi jawaban ujian
+          if (newData.status === 'final' && oldData.status !== 'final') {
+            tampilkanNotifikasi(
+              'Nilai Ujianmu Sudah Keluar!',
+              `Guru telah memvalidasi jawaban ujianmu. Buka menu Ujian untuk melihat hasilnya!`
+            );
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(kontenChannel);
       supabase.removeChannel(nilaiChannel);
+      supabase.removeChannel(ujianChannel);
     };
   }, []);
 

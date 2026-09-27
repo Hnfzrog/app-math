@@ -131,21 +131,23 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
       return [
         { name: 'Dashboard', href: '/guru/dashboard', icon: '📊' },
         { name: 'Kelas Saya', href: '/guru/kelas', icon: '🏫' },
+        { name: 'Ujian', href: '/guru/ujian', icon: '📝' },
         { name: 'Presensi', href: '/guru/presensi', icon: '📋' },
         { name: 'Penilaian', href: '/guru/penilaian', icon: '✍️' },
+        { name: 'Helpdesk', href: '/guru/helpdesk', icon: '🎧' },
         { name: 'Profil Saya', href: '/guru/profile', icon: '👤' },
       ];
     } else {
       return [
+        // Enam menu sesuai "Website Design.md" → TAMPILAN SISWA.
+        // Materi & Tugas dijangkau lewat Kelas Saya → tombol "Materi" → "Kerjakan di Tugas".
+        // Helpdesk lewat tombol float 🎧 di kanan bawah.
         { name: 'Dashboard', href: '/siswa/dashboard', icon: '📊' },
-        { name: 'Kelas Saya', href: '/siswa/kelas', icon: '🏫' },
-        { name: 'Presensi', href: '/siswa/presensi', icon: '📍' },
-        { name: 'Ujian', href: '/siswa/ujian', icon: '📝' },
         { name: 'Profil Saya', href: '/siswa/profile', icon: '👤' },
-        { name: 'Materi Belajar', href: '/siswa/materi', icon: '📚' },
-        { name: 'Tugas & Kuis', href: '/siswa/tugas', icon: '📝' },
+        { name: 'Presensi', href: '/siswa/presensi', icon: '📍' },
+        { name: 'Kelas Saya', href: '/siswa/kelas', icon: '🏫' },
+        { name: 'Ujian', href: '/siswa/ujian', icon: '📝' },
         { name: 'Nilai Saya', href: '/siswa/nilai', icon: '🏆' },
-        { name: 'Helpdesk', href: '/siswa/helpdesk', icon: '🎧' },
       ];
     }
   };

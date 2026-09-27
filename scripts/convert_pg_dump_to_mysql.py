@@ -100,10 +100,23 @@ TABLES = {
   `siswa_id` CHAR(36) NOT NULL,
   `jawaban_teks` LONGTEXT NULL,
   `foto_url` TEXT NULL,
+  `skor_ai` DECIMAL(10,2) NULL,
+  `feedback_ai` LONGTEXT NULL,
+  `skor_final` DECIMAL(10,2) NULL,
+  `dinilai_at` DATETIME(6) NULL,
+  `status` ENUM('pending_verifikasi','final') NOT NULL DEFAULT 'pending_verifikasi',
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
   CONSTRAINT `fk_jawaban_ujian_soal` FOREIGN KEY (`soal_id`) REFERENCES `soal_ujian` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_jawaban_ujian_user` FOREIGN KEY (`siswa_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;""",
+    "soal_ujian_kunci": """CREATE TABLE `soal_ujian_kunci` (
+  `soal_id` CHAR(36) NOT NULL,
+  `kunci_jawaban` LONGTEXT NOT NULL,
+  `pembahasan` LONGTEXT NULL,
+  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`soal_id`),
+  CONSTRAINT `fk_soal_ujian_kunci_soal` FOREIGN KEY (`soal_id`) REFERENCES `soal_ujian` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;""",
     "konten": """CREATE TABLE `konten` (
   `id` CHAR(36) NOT NULL,
@@ -210,6 +223,9 @@ TABLES = {
   `id` CHAR(36) NOT NULL,
   `ujian_id` CHAR(36) NOT NULL,
   `pertanyaan` LONGTEXT NOT NULL,
+  `tipe` ENUM('pg','uraian') NOT NULL DEFAULT 'uraian',
+  `opsi` JSON NULL,
+  `multi_jawaban` TINYINT(1) NOT NULL DEFAULT 0,
   `butuh_foto_jawaban` TINYINT(1) NULL DEFAULT 0,
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `lampiran_url` TEXT NULL,
@@ -223,6 +239,10 @@ TABLES = {
   `jenis` ENUM('UH','UTS','UAS') NOT NULL,
   `deskripsi` LONGTEXT NULL,
   `durasi_menit` INT NOT NULL,
+  `mulai_at` DATETIME(6) NULL,
+  `selesai_at` DATETIME(6) NULL,
+  `is_terbit` TINYINT(1) NOT NULL DEFAULT 0,
+  `bab_id` CHAR(36) NULL,
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
   CONSTRAINT `fk_ujian_guru` FOREIGN KEY (`guru_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
@@ -231,7 +251,7 @@ TABLES = {
 }
 
 COPY_RE = re.compile(r"^COPY public\.(\w+) \((.*?)\) FROM stdin;$")
-BOOLEAN_COLUMNS = {"is_read", "butuh_upload", "butuh_foto_jawaban"}
+BOOLEAN_COLUMNS = {"is_read", "butuh_upload", "butuh_foto_jawaban", "multi_jawaban", "is_terbit"}
 
 
 def decode_copy_field(value: str) -> str | None:

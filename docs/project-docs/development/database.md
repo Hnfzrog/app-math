@@ -72,7 +72,18 @@ Add columns for GPS validation.
 - `longitude` (numeric)
 - `status_validasi` (text, check in ('pending', 'valid', 'invalid'))
 - `feedback_guru` (text)
-- `foto_url` (text, usage PENDING)
+- `foto_url` (text — diisi dari kamera langsung via `CameraCapture` + `uploadImage(file, 'presensi')`)
+
+`status` (text, **NOT NULL**): nilai yang sah menurut CHECK constraint adalah
+**`masuk` | `izin` | `sakit` | `alpha`**. Gunakan `masuk` untuk kehadiran — bukan `hadir`
+(nilai `hadir` tidak ada di constraint mana pun dan insert-nya akan ditolak).
+
+Dua sumber baris presensi:
+1. **Siswa** — presensi mandiri dengan GPS (radius dari `pengaturan.radius_meter`); `status_validasi` default `pending`.
+2. **Guru** — input manual per siswa atau sekelas sekaligus (`/guru/presensi` → "Input Presensi Manual"), foto wajib dari kamera, `status_validasi` langsung `valid`, `latitude`/`longitude` null.
+
+Tidak ada UNIQUE `(siswa_id, tanggal)` — pencegahan presensi ganda dilakukan di aplikasi
+(form guru menandai dan mengunci siswa yang sudah tercatat hari ini).
 
 ### 6. `ujian` Table (New)
 Table for exams created by Guru.
@@ -82,11 +93,42 @@ Table for exams created by Guru.
 - `jenis` (text, check in ('UH', 'UTS', 'UAS'))
 - `deskripsi` (text)
 - `durasi_menit` (integer)
+- `mulai_at` (timestamptz, nullable) — jadwal buka
+- `selesai_at` (timestamptz, nullable) — jadwal tutup
+- `is_terbit` (boolean, NOT NULL, default `false`) — status terbit
 - `created_at` (timestamp)
 
-### 7. `soal_ujian` and `jawaban_ujian` (New)
-- `soal_ujian`: `id`, `ujian_id`, `pertanyaan`, `butuh_foto_jawaban` (boolean)
-- `jawaban_ujian`: `id`, `soal_id`, `siswa_id`, `jawaban_teks`, `foto_url` (PENDING)
+**Jadwal & terbit.** Guru wajib mengisi `mulai_at`/`selesai_at` di form; kolomnya nullable di DB
+supaya ujian lama (yang belum punya jadwal) tidak menggagalkan migrasi. Integritas dijaga
+constraint `ujian_jadwal_check`: ujian hanya boleh `is_terbit = true` bila kedua jadwal terisi
+dan `selesai_at > mulai_at`.
+
+Alurnya: ujian baru default **DRAF** → siswa tidak melihatnya sama sekali (`/siswa/ujian`
+memfilter `is_terbit = true`, dan policy `ujian read` juga membatasi) → guru menerbitkan →
+siswa melihat jadwalnya dan tombolnya aktif sesuai status:
+
+| Status | Syarat | Tombol siswa |
+|---|---|---|
+| DRAF | `is_terbit = false` | (tidak tampil) |
+| BELUM DIBUKA | `now < mulai_at` | nonaktif |
+| BERLANGSUNG | di dalam jendela | Mulai Ujian |
+| DITUTUP | `now > selesai_at` | nonaktif |
+
+Jadwal bersifat **gerbang masuk saja**: begitu siswa mulai, yang mengatur hanya `durasi_menit`.
+`/api/ujian/submit` menolak ujian yang belum terbit, tapi tidak mengecek waktu — supaya siswa
+yang sudah terlanjur mulai tetap bisa mengumpulkan.
+
+Trigger `trg_notif_ujian_terbit_ins` / `trg_notif_ujian_terbit_upd` mengirim notifikasi ke siswa
+sekelas saat ujian menjadi terbit (menggantikan `trg_notif_ujian_baru` yang menembak saat INSERT).
+
+### 7. `soal_ujian`, `soal_ujian_kunci`, and `jawaban_ujian` (New)
+- `soal_ujian`: `id`, `ujian_id`, `pertanyaan`, `tipe` (text, check in ('pg','uraian')), `opsi` (jsonb — daftar opsi pilihan ganda), `multi_jawaban` (boolean — pg dengan lebih dari satu jawaban benar), `butuh_foto_jawaban` (boolean), `lampiran_url`
+- `soal_ujian_kunci`: `soal_id` (pk, fk ke `soal_ujian`), `kunci_jawaban` (text — pg: JSON array teks opsi benar, mengikuti format `soal.kunci_jawaban`; uraian: kunci/rubrik acuan AI), `pembahasan`, `created_at`
+  - **Tabel terpisah dengan sengaja**: policy baca `soal_ujian` terbuka untuk guru (dipakai fitur "Ambil Soal dari Ujian Lain"), jadi kunci tidak boleh ikut terbaca. Siswa tidak punya policy sama sekali; guru hanya untuk ujian kelasnya.
+  - Penilaian karena itu dijalankan server-side lewat `POST /api/ujian/submit` (kunci tidak pernah sampai ke browser).
+- `jawaban_ujian`: `id`, `soal_id`, `siswa_id`, `jawaban_teks` (pg: teks opsi, multi-jawaban: JSON array), `foto_url`, `skor_ai`, `feedback_ai`, `skor_final`, `dinilai_at`, `status` (text, check in ('pending_verifikasi','final')), `created_at`
+  - Alur: pg dinilai otomatis 0/100 saat submit; uraian dibantu Gemini; guru mengedit `skor_final` lalu memvalidasi (`status='final'`) lewat `/guru/ujian/[id]/hasil`.
+  - Trigger `trg_notif_ujian_divalidasi` mengirim notifikasi ke siswa saat status berubah menjadi `final`.
 
 ### 8. `nilai` Table Modifications
 Update grading logic. Add columns to `public.nilai`:

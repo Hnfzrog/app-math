@@ -6,6 +6,8 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import PhotoUpload from '@/components/PhotoUpload';
 import { uploadImage, fileUrl } from '@/lib/uploadClient';
 import { generateKopPdf } from '@/lib/pdf';
+import Link from 'next/link';
+import { badgeStatusUjian, labelStatusUjian, statusUjian } from '@/lib/jadwalUjian';
 
 export default function GuruPenilaian() {
   const { userId, loading: userLoading } = useCurrentUser();
@@ -16,8 +18,9 @@ export default function GuruPenilaian() {
   const [filterKelas, setFilterKelas] = useState<string>('');
   const [filterBab, setFilterBab] = useState<string>('');
 
-  const [tampilan, setTampilan] = useState<'menyeluruh' | 'tunggal'>('menyeluruh');
+  const [tampilan, setTampilan] = useState<'menyeluruh' | 'tunggal' | 'ujian'>('menyeluruh');
   const [siswaList, setSiswaList] = useState<any[]>([]);
+  const [ujianList, setUjianList] = useState<any[]>([]);
 
   // Tunggal: input nilai per siswa untuk bab yang dipilih
   const [formInput, setFormInput] = useState<Record<string, { skor_benar: number, skor_presensi: number, umpan_balik: string, umpan_balik_foto_url: string }>>({});
@@ -55,6 +58,25 @@ export default function GuruPenilaian() {
       fetchNilaiMenyeluruh();
     }
   }, [tampilan, filterBab, siswaList]);
+
+  // Mode "Ujian": daftar ujian UTS/UAS untuk divalidasi (UH masuk ke nilai per-bab).
+  useEffect(() => {
+    if (userId && tampilan === 'ujian') fetchUjian();
+  }, [userId, tampilan, filterKelas]);
+
+  const fetchUjian = async () => {
+    let q = supabase
+      .from('ujian')
+      .select('id, jenis, deskripsi, mulai_at, selesai_at, is_terbit, kelas(nama)')
+      .eq('guru_id', userId)
+      .neq('jenis', 'UH')
+      .order('created_at', { ascending: false });
+
+    if (filterKelas) q = q.eq('kelas_id', filterKelas);
+
+    const { data } = await q;
+    setUjianList(data || []);
+  };
 
   const fetchKelas = async () => {
     const { data } = await supabase
@@ -96,10 +118,10 @@ export default function GuruPenilaian() {
     siswaList.forEach(s => {
       const n = data?.find(x => x.siswa_id === s.id);
       formMap[s.id] = {
-        skor_benar: n ? n.skor_benar : 0,
-        skor_presensi: n ? n.skor_presensi : 0,
-        umpan_balik: n ? n.umpan_balik || '' : '',
-        umpan_balik_foto_url: n ? n.umpan_balik_foto_url || '' : ''
+        skor_benar: n?.skor_benar ?? 0,
+        skor_presensi: n?.skor_presensi ?? 0,
+        umpan_balik: n?.umpan_balik || '',
+        umpan_balik_foto_url: n?.umpan_balik_foto_url || ''
       };
     });
     setFormInput(formMap);
@@ -259,6 +281,7 @@ export default function GuruPenilaian() {
             >
               <option value="menyeluruh">Tabel Menyeluruh (Semua Bab)</option>
               <option value="tunggal">Tunggal (Per Bab)</option>
+              <option value="ujian">Ujian (UTS/UAS)</option>
             </select>
           </div>
         </div>
@@ -320,6 +343,46 @@ export default function GuruPenilaian() {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : tampilan === 'ujian' ? (
+        <div className="card card-body">
+          <h4 className="mb-3">Ujian UTS / UAS</h4>
+          <p className="text-muted">
+            Validasi hasil ujian UTS/UAS di sini. UH sudah otomatis masuk ke nilai per-bab.
+          </p>
+          {ujianList.length === 0 ? (
+            <p className="text-center text-muted my-4">Belum ada ujian UTS/UAS.</p>
+          ) : (
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Kelas</th>
+                    <th>Jenis</th>
+                    <th>Deskripsi</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ujianList.map(u => {
+                    const st = statusUjian(u);
+                    return (
+                      <tr key={u.id}>
+                        <td>{u.kelas?.nama}</td>
+                        <td>{u.jenis}</td>
+                        <td>{u.deskripsi}</td>
+                        <td><span className={`badge ${badgeStatusUjian(st)}`}>{labelStatusUjian(st)}</span></td>
+                        <td>
+                          <Link href={`/guru/ujian/${u.id}/hasil`} className="btn btn-sm btn-outline">Validasi Hasil</Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ) : (
         // Tampilan Tunggal (per bab)

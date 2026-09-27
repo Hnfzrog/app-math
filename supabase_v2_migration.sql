@@ -98,12 +98,132 @@ ALTER TABLE public.soal_ujian ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.jawaban_ujian ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forum_belajar ENABLE ROW LEVEL SECURITY;
 
--- 6. Verifikasi hasil migration
+-- 6. UJIAN: soal pilihan ganda + penilaian & validasi guru
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS tipe text NOT NULL DEFAULT 'uraian'
+  CHECK (tipe IN ('pg', 'uraian'));
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS opsi jsonb;
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS multi_jawaban boolean NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS public.soal_ujian_kunci (
+  soal_id uuid PRIMARY KEY REFERENCES public.soal_ujian ON DELETE CASCADE,
+  kunci_jawaban text NOT NULL,
+  pembahasan text,
+  created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS skor_ai numeric;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS feedback_ai text;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS skor_final numeric;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS dinilai_at timestamptz;
+ALTER TABLE public.jawaban_ujian ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending_verifikasi'
+  CHECK (status IN ('pending_verifikasi', 'final'));
+
+ALTER TABLE public.soal_ujian_kunci ENABLE ROW LEVEL SECURITY;
+
+-- 6a. Guru memvalidasi jawaban ujian → notif ke siswa
+CREATE OR REPLACE FUNCTION public.notif_ujian_divalidasi()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.status = 'final' AND OLD.status IS DISTINCT FROM 'final' THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    VALUES (NEW.siswa_id, 'Nilaimu sudah keluar! Guru telah memvalidasi jawaban ujianmu.');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_divalidasi ON public.jawaban_ujian;
+CREATE TRIGGER trg_notif_ujian_divalidasi AFTER UPDATE ON public.jawaban_ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_divalidasi();
+
+-- 8. UJIAN: jadwal buka/tutup + status terbit
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS mulai_at timestamptz;
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS selesai_at timestamptz;
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS is_terbit boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.ujian DROP CONSTRAINT IF EXISTS ujian_jadwal_check;
+ALTER TABLE public.ujian ADD CONSTRAINT ujian_jadwal_check CHECK (
+  NOT is_terbit OR (mulai_at IS NOT NULL AND selesai_at IS NOT NULL AND selesai_at > mulai_at)
+);
+
+-- Notif ujian HANYA saat terbit; menggantikan trg_notif_ujian yang menembak saat INSERT.
+DROP TRIGGER IF EXISTS trg_notif_ujian ON public.ujian;
+
+CREATE OR REPLACE FUNCTION public.notif_ujian_terbit_insert()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_terbit THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Ujian baru (' || NEW.jenis || ') sudah dibuka untuk kelas Anda.'
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION public.notif_ujian_terbit_update()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_terbit AND NOT OLD.is_terbit THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Ujian baru (' || NEW.jenis || ') sudah dibuka untuk kelas Anda.'
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_terbit_ins ON public.ujian;
+CREATE TRIGGER trg_notif_ujian_terbit_ins AFTER INSERT ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_terbit_insert();
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_terbit_upd ON public.ujian;
+CREATE TRIGGER trg_notif_ujian_terbit_upd AFTER UPDATE ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_terbit_update();
+
+-- 8b. Perbaikan RLS untuk trigger notifikasi LAMA (dibuat saat setup awal sebagai SECURITY
+-- INVOKER, sehingga INSERT ke notifikasi gagal ketika yang memicu adalah guru/siswa).
+-- CREATE OR REPLACE ini idempotent dan hanya mengubah atribut keamanannya.
+CREATE OR REPLACE FUNCTION public.notif_konten_baru()
+RETURNS trigger AS $$
+DECLARE kelas uuid;
+BEGIN
+  SELECT kelas_id INTO kelas FROM public.bab WHERE id = NEW.bab_id;
+  IF kelas IS NOT NULL THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Materi/Tugas baru: ' || NEW.judul
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = kelas;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION public.notif_nilai_baru()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.notifikasi (user_id, pesan)
+  VALUES (NEW.siswa_id, 'Guru telah memberi nilai/umpan balik untuk salah satu bab.');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION public.notif_laporan_selesai()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.status = 'selesai' AND OLD.status IS DISTINCT FROM 'selesai' THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    VALUES (NEW.user_id, 'Laporan Anda telah diselesaikan oleh admin.');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- 8c. UJIAN: hubungkan ke bab (UH → nilai per-bab)
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS bab_id uuid REFERENCES public.bab ON DELETE SET NULL;
+
+-- 9. Verifikasi hasil migration
 SELECT table_name
 FROM information_schema.tables
 WHERE table_schema = 'public'
   AND table_name IN (
     'laporan', 'jadwal', 'notifikasi', 'ujian',
-    'soal_ujian', 'jawaban_ujian', 'forum_belajar'
+    'soal_ujian', 'jawaban_ujian', 'forum_belajar', 'soal_ujian_kunci'
   )
 ORDER BY table_name;

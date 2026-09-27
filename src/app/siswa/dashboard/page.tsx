@@ -135,7 +135,8 @@ export default function SiswaDashboard() {
 
     // Ujian: selesai / total
     if (kelasId) {
-      const { data: ujianAll } = await supabase.from('ujian').select('id').eq('kelas_id', kelasId);
+      // Hanya hitung ujian yang sudah diterbitkan — draf memang tidak muncul di daftar siswa.
+      const { data: ujianAll } = await supabase.from('ujian').select('id').eq('kelas_id', kelasId).eq('is_terbit', true);
       const ujianIds = (ujianAll || []).map((u: any) => u.id);
       setUjianTotal(ujianIds.length);
       let done = 0;

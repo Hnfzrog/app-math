@@ -15,6 +15,23 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT EXISTS (SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = _kelas_id);
 $$;
 
+CREATE OR REPLACE FUNCTION public.is_guru()
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'guru');
+$$;
+
+-- Apakah auth.uid() guru pengampu kelas dari ujian yang memiliki soal _soal_id.
+-- Dipakai untuk membatasi akses kunci jawaban & validasi jawaban ujian.
+CREATE OR REPLACE FUNCTION public.is_guru_soal_ujian(_soal_id uuid)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.soal_ujian su
+    JOIN public.ujian u ON u.id = su.ujian_id
+    JOIN public.guru_kelas gk ON gk.kelas_id = u.kelas_id
+    WHERE su.id = _soal_id AND gk.guru_id = auth.uid()
+  );
+$$;
+
 -- ==========================================
 -- USERS
 -- ==========================================
@@ -23,6 +40,20 @@ CREATE POLICY "admin full users" ON public.users FOR ALL TO authenticated USING 
 
 DROP POLICY IF EXISTS "users update own" ON public.users;
 CREATE POLICY "users update own" ON public.users FOR UPDATE TO authenticated USING (id = auth.uid()) WITH CHECK (id = auth.uid());
+
+-- Setiap user membaca barisnya sendiri (dipakai useCurrentUser / nama di topbar & pakta integritas).
+DROP POLICY IF EXISTS "users read own" ON public.users;
+CREATE POLICY "users read own" ON public.users FOR SELECT TO authenticated USING (id = auth.uid());
+
+-- Guru perlu membaca identitas siswa di kelas yang diampu (daftar siswa, halaman hasil ujian).
+-- Sengaja TIDAK menyentuh public.users di dalam USING agar tidak rekursi policy.
+DROP POLICY IF EXISTS "guru read siswa kelasnya" ON public.users;
+CREATE POLICY "guru read siswa kelasnya" ON public.users FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.siswa_kelas sk
+    JOIN public.guru_kelas gk ON gk.kelas_id = sk.kelas_id
+    WHERE sk.siswa_id = users.id AND gk.guru_id = auth.uid()
+  ));
 
 -- ==========================================
 -- KELAS
@@ -99,6 +130,11 @@ DROP POLICY IF EXISTS "admin full presensi" ON public.presensi;
 CREATE POLICY "admin full presensi" ON public.presensi FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
 DROP POLICY IF EXISTS "siswa insert own presensi" ON public.presensi;
 CREATE POLICY "siswa insert own presensi" ON public.presensi FOR INSERT TO authenticated WITH CHECK (siswa_id = auth.uid());
+-- Guru mencatat presensi manual (per siswa / sekelas) untuk kelas yang diampu.
+DROP POLICY IF EXISTS "guru insert presensi kelasnya" ON public.presensi;
+CREATE POLICY "guru insert presensi kelasnya" ON public.presensi FOR INSERT TO authenticated
+  WITH CHECK (is_guru_kelas(kelas_id));
+
 DROP POLICY IF EXISTS "guru validate presensi" ON public.presensi;
 CREATE POLICY "guru validate presensi" ON public.presensi FOR UPDATE TO authenticated
   USING (is_guru_kelas(presensi.kelas_id))
@@ -140,8 +176,21 @@ CREATE POLICY "guru manage own jadwal" ON public.jadwal FOR ALL TO authenticated
 -- ==========================================
 -- UJIAN
 -- ==========================================
+-- Siswa hanya melihat ujian kelasnya yang sudah TERBIT (draf disembunyikan sampai guru
+-- menerbitkan). Guru & admin tetap melihat semuanya.
 DROP POLICY IF EXISTS "ujian read" ON public.ujian;
-CREATE POLICY "ujian read" ON public.ujian FOR SELECT TO authenticated USING (true);
+CREATE POLICY "ujian read" ON public.ujian FOR SELECT TO authenticated
+  USING (
+    is_admin()
+    OR is_guru()
+    OR (
+      ujian.is_terbit
+      AND EXISTS (
+        SELECT 1 FROM public.siswa_kelas sk
+        WHERE sk.kelas_id = ujian.kelas_id AND sk.siswa_id = auth.uid()
+      )
+    )
+  );
 DROP POLICY IF EXISTS "admin full ujian" ON public.ujian;
 CREATE POLICY "admin full ujian" ON public.ujian FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
 DROP POLICY IF EXISTS "guru manage ujian" ON public.ujian;
@@ -151,8 +200,19 @@ CREATE POLICY "guru manage ujian" ON public.ujian FOR ALL TO authenticated
 -- ==========================================
 -- SOAL_UJIAN
 -- ==========================================
+-- Siswa hanya boleh membaca soal ujian kelasnya; guru boleh semua (soal tanpa kunci dipakai
+-- bersama antar guru untuk fitur "Ambil Soal dari Ujian Lain"). Kunci ada di soal_ujian_kunci.
 DROP POLICY IF EXISTS "soal_ujian read" ON public.soal_ujian;
-CREATE POLICY "soal_ujian read" ON public.soal_ujian FOR SELECT TO authenticated USING (true);
+CREATE POLICY "soal_ujian read" ON public.soal_ujian FOR SELECT TO authenticated
+  USING (
+    is_admin()
+    OR is_guru()
+    OR EXISTS (
+      SELECT 1 FROM public.ujian u
+      JOIN public.siswa_kelas sk ON sk.kelas_id = u.kelas_id
+      WHERE u.id = soal_ujian.ujian_id AND sk.siswa_id = auth.uid()
+    )
+  );
 DROP POLICY IF EXISTS "admin full soal_ujian" ON public.soal_ujian;
 CREATE POLICY "admin full soal_ujian" ON public.soal_ujian FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
 DROP POLICY IF EXISTS "guru manage soal_ujian" ON public.soal_ujian;
@@ -169,6 +229,31 @@ DROP POLICY IF EXISTS "siswa insert own jawaban_ujian" ON public.jawaban_ujian;
 CREATE POLICY "siswa insert own jawaban_ujian" ON public.jawaban_ujian FOR INSERT TO authenticated WITH CHECK (siswa_id = auth.uid());
 DROP POLICY IF EXISTS "siswa read own jawaban_ujian" ON public.jawaban_ujian;
 CREATE POLICY "siswa read own jawaban_ujian" ON public.jawaban_ujian FOR SELECT TO authenticated USING (siswa_id = auth.uid());
+
+-- Guru membaca jawaban siswa di ujian kelasnya (halaman hasil ujian).
+DROP POLICY IF EXISTS "guru read jawaban_ujian" ON public.jawaban_ujian;
+CREATE POLICY "guru read jawaban_ujian" ON public.jawaban_ujian FOR SELECT TO authenticated
+  USING (is_guru_soal_ujian(soal_id));
+
+-- Guru memvalidasi nilai (set skor_final + status='final').
+DROP POLICY IF EXISTS "guru validate jawaban_ujian" ON public.jawaban_ujian;
+CREATE POLICY "guru validate jawaban_ujian" ON public.jawaban_ujian FOR UPDATE TO authenticated
+  USING (is_guru_soal_ujian(soal_id))
+  WITH CHECK (is_guru_soal_ujian(soal_id));
+
+-- ==========================================
+-- SOAL_UJIAN_KUNCI
+-- ==========================================
+-- Kunci jawaban hanya untuk guru pengampu kelas ujian tsb + admin. Siswa tidak punya policy
+-- sama sekali, dan guru lain tidak bisa membaca kunci ujian bukan miliknya.
+DROP POLICY IF EXISTS "admin full soal_ujian_kunci" ON public.soal_ujian_kunci;
+CREATE POLICY "admin full soal_ujian_kunci" ON public.soal_ujian_kunci FOR ALL TO authenticated
+  USING (is_admin()) WITH CHECK (is_admin());
+
+DROP POLICY IF EXISTS "guru manage soal_ujian_kunci" ON public.soal_ujian_kunci;
+CREATE POLICY "guru manage soal_ujian_kunci" ON public.soal_ujian_kunci FOR ALL TO authenticated
+  USING (is_guru_soal_ujian(soal_id))
+  WITH CHECK (is_guru_soal_ujian(soal_id));
 
 -- ==========================================
 -- FORUM_BELAJAR

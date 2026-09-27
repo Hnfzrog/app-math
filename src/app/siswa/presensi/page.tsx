@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import PhotoUpload from '@/components/PhotoUpload';
+import CameraCapture from '@/components/CameraCapture';
 import { uploadImage } from '@/lib/uploadClient';
 
 const DEFAULT_LAT = -6.200000; // fallback bila pengaturan belum diisi
@@ -16,7 +17,7 @@ export default function SiswaPresensi() {
   const [submitting, setSubmitting] = useState(false);
   
   const [kelasId, setKelasId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('hadir');
+  const [status, setStatus] = useState<string>('masuk');
   const [presensiHariIni, setPresensiHariIni] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [lokasiError, setLokasiError] = useState('');
@@ -130,7 +131,7 @@ export default function SiswaPresensi() {
     setSubmitting(true);
     setLokasiError('');
 
-    if (status === 'hadir') {
+    if (status === 'masuk') {
       if (!pendingFoto) {
         customAlert('Foto presensi wajib diambil langsung dari kamera.', true);
         setSubmitting(false);
@@ -216,22 +217,26 @@ export default function SiswaPresensi() {
                     value={status} 
                     onChange={e => setStatus(e.target.value)}
                   >
-                    <option value="hadir">Hadir (Wajib GPS)</option>
+                    <option value="masuk">Hadir (Wajib GPS)</option>
                     <option value="sakit">Sakit</option>
                     <option value="izin">Izin</option>
                   </select>
                 </div>
                 
-                {status === 'hadir' && (
+                {status === 'masuk' && (
                   <div className="alert alert-info mb-3">
                     <small>Pastikan Anda berada di area sekolah. Browser akan meminta izin akses lokasi Anda.</small>
                   </div>
                 )}
 
                 <div className="form-group">
-                  <label>{status === 'hadir' ? 'Foto Presensi (Wajib, dari kamera)' : 'Bukti/Surat (opsional)'}</label>
-                  <PhotoUpload value={null} onFileChange={setPendingFoto} label="Foto Presensi" capture={status === 'hadir'} />
-                  {status === 'hadir' && <small className="text-muted">Foto diambil langsung dari kamera, tidak bisa dari galeri.</small>}
+                  <label>{status === 'masuk' ? 'Foto Presensi (Wajib, dari kamera)' : 'Bukti/Surat (opsional)'}</label>
+                  {status === 'masuk' ? (
+                    <CameraCapture onCapture={setPendingFoto} />
+                  ) : (
+                    <PhotoUpload value={null} onFileChange={setPendingFoto} label="Bukti/Surat" accept="image/*,.pdf,.doc,.docx" />
+                  )}
+                  {status === 'masuk' && <small className="text-muted">Foto diambil langsung dari kamera, lalu dikompres otomatis.</small>}
                 </div>
 
                 {lokasiError && (
@@ -269,7 +274,7 @@ export default function SiswaPresensi() {
                       <div>
                         <strong>{new Date(h.tanggal).toLocaleDateString('id-ID')}</strong>
                         <div>
-                          Status: <span className={`badge ${h.status === 'hadir' ? 'badge-primary' : 'badge-warning'}`}>{h.status.toUpperCase()}</span>
+                          Status: <span className={`badge ${h.status === 'masuk' ? 'badge-primary' : 'badge-warning'}`}>{h.status.toUpperCase()}</span>
                         </div>
                       </div>
                       <div className="text-right">

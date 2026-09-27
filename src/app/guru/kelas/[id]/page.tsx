@@ -28,7 +28,10 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [activeBabId, setActiveBabId] = useState<string | null>(null);
   const [formTipe, setFormTipe] = useState('emateri');
   const [formJudul, setFormJudul] = useState('');
-  const [formLink, setFormLink] = useState('');
+  const [formLinks, setFormLinks] = useState<string[]>(['']);
+  const addLink = () => setFormLinks(prev => [...prev, '']);
+  const removeLink = (i: number) => setFormLinks(prev => prev.filter((_, idx) => idx !== i));
+  const updateLink = (i: number, val: string) => setFormLinks(prev => prev.map((l, idx) => (idx === i ? val : l)));
   const [formDeadline, setFormDeadline] = useState('');
   const [formFile, setFormFile] = useState<File | null>(null);
   const [editModeId, setEditModeId] = useState<string | null>(null);
@@ -129,7 +132,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setActiveBabId(babId);
     setFormTipe('emateri');
     setFormJudul('');
-    setFormLink('');
+    setFormLinks(['']);
     setFormDeadline('');
     setSoalList([]);
     setShowModal(true);
@@ -142,7 +145,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     if (m) {
       setFormTipe(m.tipe);
       setFormJudul(m.judul);
-      setFormLink(m.file_url || '');
+      setFormLinks(m.file_url ? m.file_url.split('\n').filter(Boolean) : ['']);
       setFormDeadline(m.deadline ? m.deadline.slice(0, 16) : '');
       
       if (m.tipe !== 'emateri') {
@@ -256,7 +259,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     if (!formJudul.trim()) return false;
     
     if (formTipe === 'emateri') {
-      if (!formLink.trim() && !formFile) return false;
+      if (!formLinks.some(l => l.trim()) && !formFile) return false;
     } else {
       if (soalList.length === 0) return false;
       if (pertanyaan.trim().length > 0) return false;
@@ -278,7 +281,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       return;
     }
     
-    let fileUrl: string | null = formLink || null;
+    let fileUrl: string | null = formLinks.filter(l => l.trim()).join('\n') || null;
     if (formTipe === 'emateri' && formFile) {
       try {
         fileUrl = await uploadFile(formFile, 'materi');
@@ -373,7 +376,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setShowModal(false);
     setEditModeId(null);
     setFormJudul('');
-    setFormLink('');
+    setFormLinks(['']);
     setFormDeadline('');
     setFormFile(null);
     setSoalList([]);
@@ -567,17 +570,23 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                 {formTipe === 'emateri' && (
                   <>
                     <div className="form-group">
-                      <label>Link / Isi Materi (G-Drive / YouTube)</label>
-                      <input type="url" className="form-control" value={formLink} onChange={e => setFormLink(e.target.value)} placeholder="https://..." />
+                      <label>Link Materi (G-Drive / YouTube / web) — bisa lebih dari satu</label>
+                      {formLinks.map((link, i) => (
+                        <div key={i} className="d-flex gap-2 mt-2" style={{ alignItems: 'center' }}>
+                          <input type="url" className="form-control" value={link} onChange={e => updateLink(i, e.target.value)} placeholder={`Link ${i + 1}: https://...`} />
+                          {formLinks.length > 1 && (
+                            <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLink(i)} style={{ flexShrink: 0 }}>✕</button>
+                          )}
+                        </div>
+                      ))}
+                      <button type="button" className="btn btn-sm btn-outline mt-2" onClick={addLink}>+ Tambah Link</button>
                     </div>
                     <div className="form-group">
                       <label>atau Upload File Materi (pdf/doc/ppt/gambar, maks 2MB)</label>
                       <PhotoUpload
                         value={null}
                         onFileChange={setFormFile}
-                        onLinkChange={setFormLink}
                         accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
-                        showDrive
                         label="File Materi"
                       />
                     </div>
