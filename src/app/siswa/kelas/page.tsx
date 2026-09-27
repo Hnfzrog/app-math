@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 // Hitung tahun ajaran otomatis berdasarkan bulan sekarang
-// Juli (bulan 7) ke atas = tahun ini/tahun depan, sebelumnya = tahun lalu/tahun ini
 function getTahunAjaran() {
   const now = new Date();
   const year = now.getFullYear();
@@ -19,7 +18,14 @@ export default function SiswaKelas() {
   const [kelasInfo, setKelasInfo] = useState<any>(null);
   const [guruKelas, setGuruKelas] = useState<any>(null);
   const [babs, setBabs] = useState<any[]>([]);
+  const [cariBab, setCariBab] = useState('');
   const [teman, setTeman] = useState<any[]>([]);
+  
+  // State Forum
+  const [activeForum, setActiveForum] = useState<string | null>(null);
+  const [forumMessages, setForumMessages] = useState<any[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingForum, setSendingForum] = useState(false);
 
   const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
@@ -27,11 +33,25 @@ export default function SiswaKelas() {
     if (SISWA_ID) fetchKelas();
   }, [SISWA_ID]);
 
+  // Subscribe to forum real-time updates
+  useEffect(() => {
+    if (!activeForum) return;
+
+    fetchForum(activeForum);
+
+    const channel = supabase.channel('forum-changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'forum_belajar', filter: `bab_id=eq.${activeForum}` }, () => {
+        fetchForum(activeForum);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeForum]);
+
   const fetchKelas = async () => {
     if (!SISWA_ID) return;
     setLoading(true);
 
-    // 1. Dapatkan kelas siswa
     const { data: siswaKelas } = await supabase
       .from('siswa_kelas')
       .select('kelas_id')
@@ -45,40 +65,22 @@ export default function SiswaKelas() {
 
     const kelasId = siswaKelas.kelas_id;
 
-    // 2. Info kelas
-    const { data: kelas } = await supabase
-      .from('kelas')
-      .select('*')
-      .eq('id', kelasId)
-      .single();
+    // Info kelas
+    const { data: kelas } = await supabase.from('kelas').select('*').eq('id', kelasId).single();
     setKelasInfo(kelas);
 
-    // 3. Wali kelas (guru yang mengajar di kelas ini)
-    const { data: guruKelasData } = await supabase
-      .from('guru_kelas')
-      .select('guru_id')
-      .eq('kelas_id', kelasId)
-      .limit(1)
-      .single();
-
+    // Wali kelas
+    const { data: guruKelasData } = await supabase.from('guru_kelas').select('guru_id').eq('kelas_id', kelasId).limit(1).single();
     if (guruKelasData) {
-      const { data: guru } = await supabase
-        .from('users')
-        .select('nama, email, nomor_hp')
-        .eq('id', guruKelasData.guru_id)
-        .single();
+      const { data: guru } = await supabase.from('users').select('nama, email, nomor_hp').eq('id', guruKelasData.guru_id).single();
       setGuruKelas(guru);
     }
 
-    // 4. Daftar bab di kelas ini
-    const { data: babData } = await supabase
-      .from('bab')
-      .select('*, konten(count)')
-      .eq('kelas_id', kelasId)
-      .order('nomor');
+    // Bab
+    const { data: babData } = await supabase.from('bab').select('*, konten(count)').eq('kelas_id', kelasId).order('nomor');
     setBabs(babData || []);
 
-    // 5. Teman sekelas
+    // Teman sekelas
     const { data: temanData } = await supabase
       .from('siswa_kelas')
       .select('siswa_id, users:siswa_id(nama, nisn)')
@@ -87,6 +89,31 @@ export default function SiswaKelas() {
     setTeman(temanData || []);
 
     setLoading(false);
+  };
+
+  const fetchForum = async (babId: string) => {
+    const { data } = await supabase
+      .from('forum_belajar')
+      .select('*, users:user_id(nama)')
+      .eq('bab_id', babId)
+      .order('created_at', { ascending: true });
+    setForumMessages(data || []);
+  };
+
+  const kirimPesanForum = async () => {
+    if (!activeForum || !newMessage.trim()) return;
+    setSendingForum(true);
+
+    await supabase.from('forum_belajar').insert({
+      bab_id: activeForum,
+      user_id: SISWA_ID,
+      pesan: newMessage.trim()
+    });
+
+    setNewMessage('');
+    setSendingForum(false);
+    // Realtime akan re-fetch otomatis, tp jaga-jaga fetch lagi
+    fetchForum(activeForum);
   };
 
   if (loading) return <div className="text-center mt-4">Loading data kelas...</div>;
@@ -145,16 +172,64 @@ export default function SiswaKelas() {
         <div className="card">
           <div className="card-header"><h3>Kurikulum &amp; Bab Pembelajaran</h3></div>
           <div className="card-body">
+            <input
+              type="text"
+              className="form-control mb-3"
+              placeholder="🔍 Cari bab..."
+              value={cariBab}
+              onChange={e => setCariBab(e.target.value)}
+            />
             {babs.length === 0 ? (
               <p className="text-muted">Belum ada bab yang dibuat guru.</p>
             ) : (
               <ul className="notif-list">
-                {babs.map(bab => (
-                  <li key={bab.id} className="notif-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
+                {babs
+                  .filter(b => b.judul.toLowerCase().includes(cariBab.toLowerCase()) || `bab ${b.nomor}`.toLowerCase().includes(cariBab.toLowerCase()))
+                  .map(bab => (
+                  <li key={bab.id} className="notif-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <strong>Bab {bab.nomor}: {bab.judul}</strong>
+                      <div className="d-flex gap-2">
+                        <Link href="/siswa/materi" className="btn btn-sm btn-outline">Materi</Link>
+                        <button 
+                          onClick={() => setActiveForum(activeForum === bab.id ? null : bab.id)} 
+                          className="btn btn-sm btn-outline text-primary border-primary"
+                        >
+                          Diskusi
+                        </button>
+                      </div>
                     </div>
-                    <Link href="/siswa/materi" className="btn btn-sm btn-outline">Buka Materi</Link>
+                    
+                    {activeForum === bab.id && (
+                      <div className="mt-3 p-3 bg-slate-50 border rounded" style={{ fontSize: '14px' }}>
+                        <h4 className="mb-2" style={{ fontSize: '14px' }}>Forum Diskusi (Bab {bab.nomor})</h4>
+                        <div style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {forumMessages.length === 0 ? (
+                            <p className="text-muted text-sm m-0">Belum ada pesan di forum ini. Jadilah yang pertama!</p>
+                          ) : (
+                            forumMessages.map(msg => (
+                              <div key={msg.id} style={{ background: msg.user_id === SISWA_ID ? '#e0f2fe' : 'white', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', alignSelf: msg.user_id === SISWA_ID ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px', fontWeight: 'bold' }}>
+                                  {msg.users?.nama || 'Anonim'} <span style={{ fontWeight: 'normal' }}>• {new Date(msg.created_at).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</span>
+                                </div>
+                                <div style={{ wordBreak: 'break-word' }}>{msg.pesan}</div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className="d-flex gap-2">
+                          <input 
+                            type="text" 
+                            className="form-control form-control-sm" 
+                            placeholder="Tulis pesan..." 
+                            value={newMessage}
+                            onChange={e => setNewMessage(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && kirimPesanForum()}
+                          />
+                          <button className="btn btn-sm btn-primary" onClick={kirimPesanForum} disabled={sendingForum || !newMessage.trim()}>Kirim</button>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -163,7 +238,7 @@ export default function SiswaKelas() {
         </div>
 
         {/* Teman Sekelas */}
-        <div className="card">
+        <div className="card" style={{ height: 'max-content' }}>
           <div className="card-header"><h3>Teman Sekelas</h3></div>
           <div className="card-body">
             {teman.length === 0 ? (

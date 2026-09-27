@@ -153,3 +153,279 @@ CREATE POLICY "Guru can delete bab in their kelas" ON public.bab
       AND gk.guru_id = auth.uid()
     )
   );
+
+-- ==========================================
+-- UPDATE SCHEMA V2 (New Feature Additions)
+-- ==========================================
+
+-- 11. Modified Users
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS tahun_ajaran varchar(10);
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS foto_profil_url text;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS nama_wali text;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS alamat text;
+-- nomor_hp already exists, we will use it as no_telp
+
+-- 12. LAPORAN TABLE
+CREATE TABLE public.laporan (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references public.users on delete cascade not null,
+  role text not null check (role in ('guru', 'siswa')),
+  deskripsi text not null,
+  status text not null default 'menunggu' check (status in ('menunggu', 'selesai')),
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 13. JADWAL TABLE
+CREATE TABLE public.jadwal (
+  id uuid default uuid_generate_v4() primary key,
+  guru_id uuid references public.users on delete cascade not null,
+  kelas_id uuid references public.kelas on delete cascade not null,
+  hari text not null,
+  jam_mulai time not null,
+  jam_selesai time not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 14. NOTIFIKASI TABLE
+CREATE TABLE public.notifikasi (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references public.users on delete cascade not null,
+  pesan text not null,
+  is_read boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 15. Modifikasi PRESENSI
+ALTER TABLE public.presensi ADD COLUMN IF NOT EXISTS latitude numeric;
+ALTER TABLE public.presensi ADD COLUMN IF NOT EXISTS longitude numeric;
+ALTER TABLE public.presensi ADD COLUMN IF NOT EXISTS status_validasi text default 'pending' check (status_validasi in ('pending', 'valid', 'invalid'));
+ALTER TABLE public.presensi ADD COLUMN IF NOT EXISTS feedback_guru text;
+ALTER TABLE public.presensi ADD COLUMN IF NOT EXISTS foto_url text;
+
+-- 16. UJIAN TABLE
+CREATE TABLE public.ujian (
+  id uuid default uuid_generate_v4() primary key,
+  guru_id uuid references public.users on delete cascade not null,
+  kelas_id uuid references public.kelas on delete cascade not null,
+  jenis text not null check (jenis in ('UH', 'UTS', 'UAS')),
+  deskripsi text,
+  durasi_menit integer not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 17. SOAL_UJIAN TABLE
+CREATE TABLE public.soal_ujian (
+  id uuid default uuid_generate_v4() primary key,
+  ujian_id uuid references public.ujian on delete cascade not null,
+  pertanyaan text not null,
+  butuh_foto_jawaban boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 18. JAWABAN_UJIAN TABLE
+CREATE TABLE public.jawaban_ujian (
+  id uuid default uuid_generate_v4() primary key,
+  soal_id uuid references public.soal_ujian on delete cascade not null,
+  siswa_id uuid references public.users on delete cascade not null,
+  jawaban_teks text,
+  foto_url text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 19. Modifikasi NILAI
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS skor_benar numeric;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS skor_presensi numeric;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS nilai_akhir numeric;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS umpan_balik text;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS umpan_balik_foto_url text;
+
+-- 20. FORUM_BELAJAR TABLE
+CREATE TABLE public.forum_belajar (
+  id uuid default uuid_generate_v4() primary key,
+  bab_id uuid references public.bab on delete cascade not null,
+  user_id uuid references public.users on delete cascade not null,
+  pesan text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Basic RLS for New Tables
+alter table public.laporan enable row level security;
+alter table public.jadwal enable row level security;
+alter table public.notifikasi enable row level security;
+alter table public.ujian enable row level security;
+alter table public.soal_ujian enable row level security;
+alter table public.jawaban_ujian enable row level security;
+alter table public.forum_belajar enable row level security;
+
+-- ==========================================
+-- UPDATE SCHEMA V3 (Gap Closure — 27 Sep 2026)
+-- ==========================================
+
+-- 21. PENGATURAN TABLE (school identity / config, single row editable by admin)
+CREATE TABLE IF NOT EXISTS public.pengaturan (
+  id uuid default uuid_generate_v4() primary key,
+  nama_sekolah text,
+  alamat text,
+  kop_surat text,
+  latitude_pusat numeric,
+  longitude_pusat numeric,
+  radius_meter integer default 50,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Seed satu baris pengaturan default (admin can edit via UI later)
+INSERT INTO public.pengaturan (id, nama_sekolah, alamat, kop_surat, latitude_pusat, longitude_pusat, radius_meter)
+VALUES ('00000000-0000-0000-0000-000000000010', 'SMP Matematika', 'Jl. Contoh No. 1', 'SMP Matematika', NULL, NULL, 50)
+ON CONFLICT (id) DO NOTHING;
+
+-- 22. NILAI: enforce nilai_akhir derived in DB — formula (skor_benar * 0.9) + (skor_presensi * 0.1)
+CREATE OR REPLACE FUNCTION public.set_nilai_akhir()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.skor_benar IS NOT NULL OR NEW.skor_presensi IS NOT NULL THEN
+    NEW.nilai_akhir := (COALESCE(NEW.skor_benar, 0) * 0.9) + (COALESCE(NEW.skor_presensi, 0) * 0.1);
+  ELSE
+    NEW.nilai_akhir := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_set_nilai_akhir ON public.nilai;
+CREATE TRIGGER trg_set_nilai_akhir
+  BEFORE INSERT OR UPDATE ON public.nilai
+  FOR EACH ROW EXECUTE FUNCTION public.set_nilai_akhir();
+
+-- RLS untuk pengaturan: semua authenticated bisa baca; hanya admin bisa ubah
+ALTER TABLE public.pengaturan ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Authenticated can read pengaturan" ON public.pengaturan;
+CREATE POLICY "Authenticated can read pengaturan" ON public.pengaturan
+  FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Admin can manage pengaturan" ON public.pengaturan;
+CREATE POLICY "Admin can manage pengaturan" ON public.pengaturan
+  FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin'));
+
+-- RLS untuk notifikasi: user hanya akses miliknya sendiri
+DROP POLICY IF EXISTS "Users read own notifications" ON public.notifikasi;
+CREATE POLICY "Users read own notifications" ON public.notifikasi
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+DROP POLICY IF EXISTS "Users update own notifications" ON public.notifikasi;
+CREATE POLICY "Users update own notifications" ON public.notifikasi
+  FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- 23. KONTEN: deadline (tanggal + jam) untuk tugas / LKPD
+ALTER TABLE public.konten ADD COLUMN IF NOT EXISTS deadline timestamptz;
+
+-- 24. NILAI: unique (siswa_id, bab_id) untuk per-bab grading
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nilai_siswa_bab_unique') THEN
+    ALTER TABLE public.nilai ADD CONSTRAINT nilai_siswa_bab_unique UNIQUE (siswa_id, bab_id);
+  END IF;
+END $$;
+
+-- 25. SLOT_JAM: master grid jadwal (slot jam pelajaran, dinamis via admin)
+CREATE TABLE IF NOT EXISTS public.slot_jam (
+  id uuid default uuid_generate_v4() primary key,
+  jam_mulai time not null,
+  jam_selesai time not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique (jam_mulai, jam_selesai)
+);
+
+INSERT INTO public.slot_jam (jam_mulai, jam_selesai) VALUES
+  ('07:00', '08:30'),
+  ('08:30', '10:00'),
+  ('10:30', '12:00'),
+  ('13:00', '14:30')
+ON CONFLICT (jam_mulai, jam_selesai) DO NOTHING;
+
+ALTER TABLE public.slot_jam ENABLE ROW LEVEL SECURITY;
+
+-- 26. HARI: master hari (dinamis, dikelola admin)
+CREATE TABLE IF NOT EXISTS public.hari (
+  id uuid default uuid_generate_v4() primary key,
+  nama text not null unique,
+  urutan integer default 0,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+INSERT INTO public.hari (nama, urutan) VALUES
+  ('Senin', 1), ('Selasa', 2), ('Rabu', 3), ('Kamis', 4), ('Jumat', 5)
+ON CONFLICT (nama) DO NOTHING;
+
+ALTER TABLE public.hari ENABLE ROW LEVEL SECURITY;
+
+-- 27. JAWABAN_SISWA: file_url untuk lampiran jawaban (pdf/word/excel/foto, maks 2MB)
+ALTER TABLE public.jawaban_siswa ADD COLUMN IF NOT EXISTS file_url text;
+
+-- 28. SOAL (tugas/kuis): butuh_upload — guru set soal wajib upload jawaban
+ALTER TABLE public.soal ADD COLUMN IF NOT EXISTS butuh_upload boolean default false;
+
+-- 29. LAMPIRAN SOAL — guru bisa melampirkan file ke soal (gambar/dokumen)
+ALTER TABLE public.soal ADD COLUMN IF NOT EXISTS lampiran_url text;
+ALTER TABLE public.soal_ujian ADD COLUMN IF NOT EXISTS lampiran_url text;
+
+-- 30. NOTIFIKASI PRODUCER — isi tabel notifikasi otomatis (agar badge berfungsi)
+-- 30a. Materi/tugas baru → notif ke siswa sekelas
+CREATE OR REPLACE FUNCTION public.notif_konten_baru()
+RETURNS trigger AS $$
+DECLARE kelas uuid;
+BEGIN
+  SELECT kelas_id INTO kelas FROM public.bab WHERE id = NEW.bab_id;
+  IF kelas IS NOT NULL THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Materi/Tugas baru: ' || NEW.judul
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = kelas;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notif_konten ON public.konten;
+CREATE TRIGGER trg_notif_konten AFTER INSERT ON public.konten FOR EACH ROW EXECUTE FUNCTION public.notif_konten_baru();
+
+-- 30b. Ujian baru → notif ke siswa sekelas
+CREATE OR REPLACE FUNCTION public.notif_ujian_baru()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.notifikasi (user_id, pesan)
+  SELECT sk.siswa_id, 'Ujian baru (' || NEW.jenis || ') untuk kelas Anda.'
+  FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian ON public.ujian;
+CREATE TRIGGER trg_notif_ujian AFTER INSERT ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_baru();
+
+-- 30c. Nilai baru → notif ke siswa
+CREATE OR REPLACE FUNCTION public.notif_nilai_baru()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.notifikasi (user_id, pesan)
+  VALUES (NEW.siswa_id, 'Guru telah memberi nilai/umpan balik untuk salah satu bab.');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notif_nilai ON public.nilai;
+CREATE TRIGGER trg_notif_nilai AFTER INSERT ON public.nilai FOR EACH ROW EXECUTE FUNCTION public.notif_nilai_baru();
+
+-- 30d. Laporan selesai → notif ke pelapor
+CREATE OR REPLACE FUNCTION public.notif_laporan_selesai()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.status = 'selesai' AND OLD.status IS DISTINCT FROM 'selesai' THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    VALUES (NEW.user_id, 'Laporan Anda telah diselesaikan oleh admin.');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notif_laporan ON public.laporan;
+CREATE TRIGGER trg_notif_laporan AFTER UPDATE ON public.laporan FOR EACH ROW EXECUTE FUNCTION public.notif_laporan_selesai();
+

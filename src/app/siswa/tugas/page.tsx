@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import PhotoUpload from '@/components/PhotoUpload';
+import { uploadFile, fileUrl } from '@/lib/uploadClient';
 
 export default function SiswaTugas() {
   const { userId: SISWA_ID, userName: namaSiswa, loading: userLoading } = useCurrentUser();
@@ -14,6 +16,8 @@ export default function SiswaTugas() {
   
   const [currentIndex, setCurrentIndex] = useState(0);
   const [jawaban, setJawaban] = useState<Record<string, any>>({});
+  const [jawabanFiles, setJawabanFiles] = useState<Record<string, File | null>>({});
+  const [jawabanLinks, setJawabanLinks] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<'milih_kuis' | 'mengerjakan' | 'loading' | 'selesai'>('milih_kuis');
   const [hasil, setHasil] = useState<{ totalSkor: number, detail: any[] } | null>(null);
 
@@ -152,7 +156,29 @@ export default function SiswaTugas() {
 
   const handleSubmit = async () => {
     setStatus('loading');
-    
+
+    // Upload lampiran file (jika ada) — pdf/word/excel/foto, maks 2MB
+    const fileUrlMap: Record<string, string> = {};
+    for (const item of soalKuis) {
+      const pendingFile = jawabanFiles[item.id];
+      const link = jawabanLinks[item.id];
+      if (pendingFile) {
+        try {
+          fileUrlMap[item.id] = await uploadFile(pendingFile, 'tugas');
+        } catch (e: any) {
+          customAlert('Gagal upload lampiran: ' + (e?.message || e), true);
+          setStatus('milih_kuis');
+          return;
+        }
+      } else if (link) {
+        fileUrlMap[item.id] = link;
+      } else if (item.butuh_upload) {
+        customAlert('Ada soal yang wajib upload jawaban. Silakan lampirkan file terlebih dahulu.', true);
+        setStatus('milih_kuis');
+        return;
+      }
+    }
+
     let sumAi = 0;
     const detailHasil: any[] = [];
     const dbInserts: any[] = [];
@@ -195,7 +221,8 @@ export default function SiswaTugas() {
           jawaban: typeof jawabSiswa === 'string' ? jawabSiswa : JSON.stringify(jawabSiswa),
           skor_ai: isBenar ? 100 : 0, // Selalu simpan skala 0-100 di database
           feedback_ai: isBenar ? 'Auto-Graded: Benar' : 'Auto-Graded: Salah',
-          status: 'pending_verifikasi'
+          status: 'pending_verifikasi',
+          file_url: fileUrlMap[item.id] || null
         });
 
       } else if (item.tipe === 'uraian') {
@@ -231,7 +258,8 @@ export default function SiswaTugas() {
             jawaban: jawabSiswa,
             skor_ai: data.skor, // Selalu simpan skala 0-100 dari AI
             feedback_ai: data.feedback,
-            status: 'pending_verifikasi'
+            status: 'pending_verifikasi',
+            file_url: fileUrlMap[item.id] || null
           });
 
         } catch (e: any) {
@@ -247,7 +275,8 @@ export default function SiswaTugas() {
             jawaban: jawabSiswa,
             skor_ai: 0,
             feedback_ai: 'Gagal koreksi AI',
-            status: 'pending_verifikasi'
+            status: 'pending_verifikasi',
+            file_url: fileUrlMap[item.id] || null
           });
         }
       }
@@ -391,6 +420,14 @@ export default function SiswaTugas() {
       <p className="exam-question-text" style={{ whiteSpace: 'pre-wrap' }}>
         {soal.pertanyaan.includes('|||') ? soal.pertanyaan.split('|||')[0] : soal.pertanyaan}
       </p>
+
+      {soal.lampiran_url && (
+        /\.(jpg|jpeg|png|gif|webp)$/i.test(soal.lampiran_url) ? (
+          <img src={fileUrl(soal.lampiran_url)!} alt="Lampiran soal" style={{ maxWidth: '100%', maxHeight: '320px', borderRadius: '8px', marginBottom: '12px', display: 'block' }} />
+        ) : (
+          <a href={fileUrl(soal.lampiran_url)!} target="_blank" rel="noopener noreferrer" className="text-primary" style={{ display: 'block', marginBottom: '12px' }}>📎 Lihat Lampiran Soal</a>
+        )
+      )}
       
       <div className="form-group mt-4">
         <label>Jawaban Kamu:</label>
@@ -440,14 +477,26 @@ export default function SiswaTugas() {
              })()}
           </div>
         ) : (
-          <textarea 
-            className="form-control textarea-math" 
+          <textarea
+            className="form-control textarea-math"
             rows={5}
             placeholder="Ketik jawaban dan langkah-langkahmu di sini..."
             value={jawaban[soal.id] || ''}
             onChange={(e) => handleJawabanChange(e.target.value)}
           />
         )}
+
+        <div className="form-group mt-3">
+          <label>Lampiran {soal.butuh_upload ? '(Wajib)' : '(opsional)'}: PDF, Word, Excel, Foto — maks 2MB</label>
+          <PhotoUpload
+            value={null}
+            onFileChange={(file) => setJawabanFiles(prev => ({ ...prev, [soal.id]: file }))}
+            onLinkChange={(url) => setJawabanLinks(prev => ({ ...prev, [soal.id]: url }))}
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,image/*"
+            showDrive
+            label="Lampiran"
+          />
+        </div>
       </div>
       
       <div className="d-flex justify-between mt-4 pt-3" style={{ borderTop: '1px solid var(--slate-200)' }}>

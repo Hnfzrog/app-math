@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { fileUrl } from '@/lib/uploadClient';
+import GpsGate from './GpsGate';
 
 interface LmsLayoutProps {
   children: React.ReactNode;
@@ -15,6 +17,13 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const [displayName, setDisplayName] = useState(userNameProp);
+  const [fotoProfil, setFotoProfil] = useState<string | null>(null);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const [showHelpdesk, setShowHelpdesk] = useState(false);
+  const [helpdeskDeskripsi, setHelpdeskDeskripsi] = useState('');
+  const [helpdeskSending, setHelpdeskSending] = useState(false);
 
   // Fetch nama asli dari DB berdasarkan sesi aktif
   useEffect(() => {
@@ -23,12 +32,34 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
       if (!session) return;
       const { data } = await supabase
         .from('users')
-        .select('nama')
+        .select('nama, foto_profil_url')
         .eq('id', session.user.id)
         .single();
       if (data?.nama) setDisplayName(data.nama);
+      if (data?.foto_profil_url) setFotoProfil(data.foto_profil_url);
     };
     fetchName();
+    window.addEventListener('focus', fetchName);
+    return () => window.removeEventListener('focus', fetchName);
+  }, []);
+
+  // Fetch notifikasi (unread badge count) dari DB
+  useEffect(() => {
+    const fetchNotifs = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data } = await supabase
+        .from('notifikasi')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (data) {
+        setNotifications(data);
+        setUnreadNotifs(data.filter((n) => !n.is_read).length);
+      }
+    };
+    fetchNotifs();
   }, []);
 
   const toggleSidebar = (state?: boolean) => {
@@ -39,13 +70,54 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
     }
   };
 
+  const handleNotifClick = async () => {
+    setShowNotifDropdown(!showNotifDropdown);
+    if (unreadNotifs > 0) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await supabase
+          .from('notifikasi')
+          .update({ is_read: true })
+          .eq('user_id', session.user.id)
+          .eq('is_read', false);
+      }
+      setUnreadNotifs(0);
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    }
+  };
+
+  const handleKirimLaporan = async () => {
+    if (!helpdeskDeskripsi.trim()) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    setHelpdeskSending(true);
+    const { error } = await supabase.from('laporan').insert({
+      user_id: session.user.id,
+      role,
+      deskripsi: helpdeskDeskripsi.trim(),
+      status: 'menunggu'
+    });
+    setHelpdeskSending(false);
+    if (error) {
+      alert('Gagal mengirim laporan: ' + error.message);
+    } else {
+      setHelpdeskDeskripsi('');
+      setShowHelpdesk(false);
+      alert('Laporan terkirim ke admin!');
+    }
+  };
+
   const getNavLinks = () => {
     if (role === 'admin') {
       return [
         { name: 'Dashboard', href: '/admin/dashboard', icon: '📊' },
         { name: 'Kelola User', href: '/admin/users', icon: '👥' },
         { name: 'Master Kelas', href: '/admin/kelas', icon: '🏫' },
+        { name: 'Management Jadwal', href: '/admin/jadwal', icon: '📅' },
+        { name: 'Master Grid Jadwal', href: '/admin/slot-jadwal', icon: '⏰' },
+        { name: 'Helpdesk / Laporan', href: '/admin/laporan', icon: '🎧' },
         { name: 'Profil Saya', href: '/admin/profile', icon: '👤' },
+        { name: 'Pengaturan', href: '/admin/pengaturan', icon: '⚙️' },
       ];
     } else if (role === 'guru') {
       return [
@@ -59,16 +131,20 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
       return [
         { name: 'Dashboard', href: '/siswa/dashboard', icon: '📊' },
         { name: 'Kelas Saya', href: '/siswa/kelas', icon: '🏫' },
+        { name: 'Presensi', href: '/siswa/presensi', icon: '📍' },
+        { name: 'Ujian', href: '/siswa/ujian', icon: '📝' },
         { name: 'Profil Saya', href: '/siswa/profile', icon: '👤' },
         { name: 'Materi Belajar', href: '/siswa/materi', icon: '📚' },
         { name: 'Tugas & Kuis', href: '/siswa/tugas', icon: '📝' },
         { name: 'Nilai Saya', href: '/siswa/nilai', icon: '🏆' },
+        { name: 'Helpdesk', href: '/siswa/helpdesk', icon: '🎧' },
       ];
     }
   };
 
   return (
     <div className="dashboard-shell">
+      <GpsGate />
       {/* SIDEBAR */}
       <aside className={`sidebar ${sidebarOpen ? 'show' : ''}`}>
         <div className="sidebar-brand">
@@ -80,7 +156,13 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
         </div>
 
         <div className="sidebar-user">
-          <div className="user-avatar">{displayName.substring(0, 2).toUpperCase()}</div>
+          <div className="user-avatar">
+            {fotoProfil ? (
+              <img src={fileUrl(fotoProfil)!} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+            ) : (
+              displayName.substring(0, 2).toUpperCase()
+            )}
+          </div>
           <div className="user-details">
             <span className="user-name">{displayName}</span>
             <span className="user-role-badge">{role}</span>
@@ -135,10 +217,66 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
             </div>
           </div>
 
-          <div className="topbar-right">
-            <div className="topbar-user-info">
-              <span>{displayName}</span>
-              <span className="badge badge-primary">{role}</span>
+          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div className="notification-wrapper" style={{ position: 'relative' }}>
+              <button 
+                className="btn-icon" 
+                onClick={handleNotifClick}
+                style={{ position: 'relative', background: 'transparent', border: 'none', cursor: 'pointer', padding: '5px' }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+                {unreadNotifs > 0 && (
+                  <span style={{
+                    position: 'absolute', top: '0', right: '0', background: 'red', color: 'white', 
+                    borderRadius: '50%', padding: '2px 6px', fontSize: '10px', fontWeight: 'bold'
+                  }}>
+                    {unreadNotifs}
+                  </span>
+                )}
+              </button>
+              {showNotifDropdown && (
+                <div style={{
+                  position: 'absolute', top: '40px', right: '0', background: 'white', 
+                  border: '1px solid #ddd', borderRadius: '8px', width: '250px', 
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.1)', zIndex: 100
+                }}>
+                  <div style={{ padding: '10px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>Notifikasi</div>
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: '15px', fontSize: '14px', color: '#666' }}>
+                      Belum ada notifikasi baru.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                      {notifications.map((n) => (
+                        <div key={n.id} style={{ padding: '10px', borderBottom: '1px solid #eee', fontSize: '13px', color: n.is_read ? '#999' : '#333' }}>
+                          {n.pesan}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="topbar-user-info" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+              {fotoProfil ? (
+                <img
+                  src={fileUrl(fotoProfil)!}
+                  alt={displayName}
+                  style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--slate-200, #e2e8f0)', flexShrink: 0 }}
+                />
+              ) : (
+                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--primary, #4f46e5)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '14px', flexShrink: 0 }}>
+                  {displayName.substring(0, 2).toUpperCase()}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
+                <span>{displayName}</span>
+                <span className="badge badge-primary">{role}</span>
+              </div>
             </div>
           </div>
         </header>
@@ -148,6 +286,61 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
           {children}
         </main>
       </div>
+
+      {/* Floating Helpdesk (call-center) — siswa & guru */}
+      {role !== 'admin' && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowHelpdesk(true)}
+            title="Helpdesk / Lapor Kendala"
+            style={{
+              position: 'fixed', bottom: '24px', right: '24px', zIndex: 1000,
+              width: '56px', height: '56px', borderRadius: '50%',
+              background: 'var(--primary, #4f46e5)', color: 'white', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.25)', cursor: 'pointer', fontSize: '26px'
+            }}
+          >
+            🎧
+          </button>
+
+          {showHelpdesk && (
+            <div className="modal-overlay" onClick={() => setShowHelpdesk(false)}>
+              <div className="modal-dialog" style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>🎧 Helpdesk / Lapor Kendala</h3>
+                  <button type="button" className="btn-close-modal" onClick={() => setShowHelpdesk(false)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <p className="text-muted" style={{ fontSize: '13px' }}>Laporkan kendala aplikasi ke Admin.</p>
+                  <div className="form-group">
+                    <label>Deskripsi Kendala</label>
+                    <textarea
+                      className="form-control"
+                      rows={4}
+                      placeholder="Jelaskan kendala yang Anda alami..."
+                      value={helpdeskDeskripsi}
+                      onChange={(e) => setHelpdeskDeskripsi(e.target.value)}
+                    ></textarea>
+                  </div>
+                  <div className="d-flex justify-between mt-3 align-center">
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowHelpdesk(false)}>Batal</button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleKirimLaporan}
+                      disabled={helpdeskSending || !helpdeskDeskripsi.trim()}
+                    >
+                      {helpdeskSending ? 'Mengirim...' : 'Kirim Laporan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

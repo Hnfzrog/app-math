@@ -22,11 +22,9 @@ export async function POST(request: Request) {
       .eq('id', userId);
 
     if (profileError) {
-      require('fs').writeFileSync('/Users/bsi-2-2200017/Documents/app-math/delete_error.log', JSON.stringify(profileError, null, 2));
+      console.error('Delete public.users error:', profileError);
       return NextResponse.json({ error: profileError.message }, { status: 400 });
     }
-
-    require('fs').writeFileSync('/Users/bsi-2-2200017/Documents/app-math/delete_error.log', 'Delete public.users success');
 
     // 2. Delete dari auth.users (mencabut kredensial login)
     const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);

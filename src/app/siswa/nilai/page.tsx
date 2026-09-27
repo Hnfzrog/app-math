@@ -2,11 +2,16 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { generateKopPdf } from '@/lib/pdf';
 
 export default function SiswaNilai() {
   const [loading, setLoading] = useState(true);
-  const [dataNilai, setDataNilai] = useState<any[]>([]);
-  
+  const [babList, setBabList] = useState<any[]>([]);
+  const [nilaiMap, setNilaiMap] = useState<Record<string, any>>({});
+  const [allBabDone, setAllBabDone] = useState(false);
+  const [namaSiswa, setNamaSiswa] = useState('');
+  const [kelasNama, setKelasNama] = useState('');
+
   const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
@@ -16,11 +21,11 @@ export default function SiswaNilai() {
 
     // Listen to updates from Guru
     const channel = supabase.channel('siswa-nilai-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'jawaban_siswa', filter: `siswa_id=eq.${SISWA_ID}` }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'nilai', filter: `siswa_id=eq.${SISWA_ID}` }, () => {
         fetchNilai();
       })
       .subscribe();
-      
+
     return () => {
       supabase.removeChannel(channel);
     };
@@ -30,73 +35,25 @@ export default function SiswaNilai() {
     if (!SISWA_ID) return;
     setLoading(true);
     try {
-      // 1. Ambil semua jawaban siswa ini
-      const { data: jawabans, error: errJawabans } = await supabase.from('jawaban_siswa').select('*').eq('siswa_id', SISWA_ID);
-      if (errJawabans) console.error('Error jawabans:', errJawabans);
-      if (!jawabans || jawabans.length === 0) {
-        setDataNilai([]);
-        return;
+      // 1. Kelas siswa
+      const { data: sk } = await supabase.from('siswa_kelas').select('kelas_id').eq('siswa_id', SISWA_ID).limit(1);
+      const kelasId = sk && sk.length > 0 ? sk[0].kelas_id : null;
+
+      const { data: u } = await supabase.from('users').select('nama').eq('id', SISWA_ID).single();
+      if (u?.nama) setNamaSiswa(u.nama);
+
+      if (kelasId) {
+        const { data: babs } = await supabase.from('bab').select('id, nomor, judul').eq('kelas_id', kelasId).order('nomor');
+        if (babs) setBabList(babs);
+        const { data: kls } = await supabase.from('kelas').select('nama').eq('id', kelasId).single();
+        if (kls?.nama) setKelasNama(kls.nama);
       }
-      
-      const soalIds = jawabans.map(j => j.soal_id);
-      
-      // 2. Ambil referensi soal
-      const { data: soals, error: errSoals } = await supabase.from('soal').select('id, konten_id').in('id', soalIds);
-      if (errSoals) console.error('Error soals:', errSoals);
-      if (!soals || soals.length === 0) return;
-      
-      const kontenIds = [...new Set(soals.map(s => s.konten_id))];
-      
-      // 3. Ambil konten
-      const { data: kontens, error: errKontens } = await supabase.from('konten').select('id, bab_id, judul, tipe').in('id', kontenIds);
-      if (errKontens) console.error('Error kontens:', errKontens);
-      if (!kontens || kontens.length === 0) return;
-      
-      const babIds = [...new Set(kontens.map(k => k.bab_id))];
-      
-      // 4. Ambil bab
-      const { data: babs } = await supabase.from('bab').select('id, judul').in('id', babIds);
-      
-      // Map semuanya menjadi data per modul
-      const hasilAkhir: any[] = [];
-      
-      for (const konten of kontens) {
-        const bab = babs?.find(b => b.id === konten.bab_id);
-        const soalTerkait = soals.filter(s => s.konten_id === konten.id).map(s => s.id);
-        const jawabanUntukKonten = jawabans.filter(j => soalTerkait.includes(j.soal_id));
-        
-        let totalSkor = 0;
-        let isDinilaiGuru = true;
-        
-        if (jawabanUntukKonten.length > 0) {
-          const firstJ = jawabanUntukKonten[0];
-          // Jika sudah dinilai, ambil skor_final (karena sama untuk semua soal di satu modul)
-          if (firstJ.skor_final !== null && firstJ.skor_final !== undefined) {
-            totalSkor = firstJ.skor_final;
-          } else {
-            // Jika belum dinilai, hitung rata-rata skor AI
-            let sumAi = 0;
-            jawabanUntukKonten.forEach(j => {
-              sumAi += (j.skor_ai || 0);
-              if (j.status !== 'final') {
-                isDinilaiGuru = false;
-              }
-            });
-            totalSkor = Math.round(sumAi / jawabanUntukKonten.length);
-          }
-        }
-        
-        hasilAkhir.push({
-          id: konten.id,
-          judulBab: bab ? bab.judul : 'Bab Tidak Diketahui',
-          judulModul: konten.judul,
-          tipe: konten.tipe,
-          skor: totalSkor,
-          status: isDinilaiGuru ? 'Sudah Dinilai' : 'Menunggu Verifikasi Guru'
-        });
-      }
-      
-      setDataNilai(hasilAkhir);
+
+      // 2. Nilai siswa (per bab)
+      const { data } = await supabase.from('nilai').select('*').eq('siswa_id', SISWA_ID);
+      const map: Record<string, any> = {};
+      (data || []).forEach(n => { map[n.bab_id] = n; });
+      setNilaiMap(map);
     } catch (e) {
       console.error(e);
     } finally {
@@ -104,46 +61,101 @@ export default function SiswaNilai() {
     }
   };
 
+  // e-Rapor tersedia otomatis jika semua bab sudah dinilai
+  useEffect(() => {
+    setAllBabDone(babList.length > 0 && babList.every(b => nilaiMap[b.id]?.nilai_akhir != null));
+  }, [babList, nilaiMap]);
+
+  const handleCetakPDF = async () => {
+    const columns = ['No', 'Bab', 'Skor Benar', 'Skor Presensi', 'Nilai Akhir', 'Umpan Balik'];
+    const rows = babList.map((b, i) => {
+      const n = nilaiMap[b.id];
+      return [
+        i + 1,
+        `${b.nomor}. ${b.judul}`,
+        n?.skor_benar != null ? String(n.skor_benar) : '-',
+        n?.skor_presensi != null ? String(n.skor_presensi) : '-',
+        n?.nilai_akhir != null ? Number(n.nilai_akhir).toFixed(2) : '-',
+        n?.umpan_balik || '-'
+      ];
+    });
+    const vals = babList.map(b => nilaiMap[b.id]?.nilai_akhir).filter(v => v != null).map(Number);
+    const rata = vals.length > 0 ? (vals.reduce((a, c) => a + c, 0) / vals.length).toFixed(2) : '-';
+    rows.push(['', '', '', '', '', '']);
+    rows.push(['', 'Rata-rata', '', '', rata, '']);
+    await generateKopPdf({
+      title: 'e-Rapor Siswa',
+      subtitle: `${namaSiswa}${kelasNama ? ' — Kelas ' + kelasNama : ''}`,
+      columns,
+      rows,
+      filename: 'e-rapor.pdf'
+    });
+  };
+
   if (loading || userLoading) return <div className="text-center mt-4">Loading data nilai...</div>;
 
   return (
     <div>
-      <h1 style={{ marginBottom: '1.5rem' }}>Nilai Saya</h1>
+      <div className="d-flex justify-between align-center mb-4 hide-on-print">
+        <div>
+          <h2 style={{ margin: 0 }}>Nilai Saya (e-Rapor)</h2>
+          <p className="text-muted" style={{ margin: '4px 0 0' }}>Laporan hasil belajar per bab.</p>
+        </div>
+        {allBabDone && (
+          <button onClick={handleCetakPDF} className="btn btn-primary">Cetak e-Rapor PDF</button>
+        )}
+      </div>
+
       <div className="card card-body">
-        {dataNilai.length === 0 ? (
-          <p className="text-muted">Kamu belum mengerjakan tugas atau kuis apapun.</p>
+        {babList.length === 0 ? (
+          <p className="text-muted text-center my-4">Belum ada bab yang tersedia untuk kelas Anda.</p>
         ) : (
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Bab / Topik</th>
-                  <th>Kategori</th>
-                  <th>Judul Tugas/Ujian</th>
-                  <th>Nilai Total</th>
-                  <th>Status Penilaian</th>
+                  <th>No</th>
+                  <th>Bab</th>
+                  <th>Skor Benar</th>
+                  <th>Skor Presensi</th>
+                  <th>Nilai Akhir</th>
+                  <th>Status</th>
+                  <th>Umpan Balik Guru</th>
                 </tr>
               </thead>
               <tbody>
-                {dataNilai.map((item, idx) => (
-                  <tr key={idx}>
-                    <td>{item.judulBab}</td>
-                    <td><span className="badge badge-info">{item.tipe.toUpperCase()}</span></td>
-                    <td><strong>{item.judulModul}</strong></td>
-                    <td>
-                      <span className="text-primary font-bold" style={{ fontSize: '1.2rem' }}>
-                        {item.skor}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`badge ${item.status === 'Sudah Dinilai' ? 'badge-success' : 'badge-warning'}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {babList.map((b, idx) => {
+                  const n = nilaiMap[b.id];
+                  return (
+                    <tr key={b.id}>
+                      <td>{idx + 1}</td>
+                      <td><strong>{b.nomor}. {b.judul}</strong></td>
+                      <td>{n?.skor_benar ?? '-'}</td>
+                      <td>{n?.skor_presensi ?? '-'}</td>
+                      <td>
+                        {n?.nilai_akhir != null ? (
+                          <span className={`font-bold ${n.nilai_akhir >= 75 ? 'text-success' : 'text-danger'}`} style={{ fontSize: '1.2rem' }}>
+                            {Number(n.nilai_akhir).toFixed(2)}
+                          </span>
+                        ) : '-'}
+                      </td>
+                      <td>
+                        {n?.nilai_akhir != null
+                          ? <span className="badge badge-success">Sudah Dinilai</span>
+                          : <span className="badge badge-warning">Belum</span>}
+                      </td>
+                      <td>{n?.umpan_balik || '-'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+
+            {!allBabDone && (
+              <p className="text-muted mt-3" style={{ fontSize: '13px' }}>
+                e-Rapor (PDF) akan tersedia otomatis setelah semua bab selesai dinilai oleh guru.
+              </p>
+            )}
           </div>
         )}
       </div>

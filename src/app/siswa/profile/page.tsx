@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import PhotoUpload from '@/components/PhotoUpload';
+import { updateProfile } from '@/lib/uploadClient';
 
 export default function SiswaProfile() {
   const [loading, setLoading] = useState(true);
@@ -20,8 +22,12 @@ export default function SiswaProfile() {
     nisn: '',
     tanggal_lahir: '',
     jenis_kelamin: '',
-    nomor_hp: ''
+    nomor_hp: '',
+    nama_wali: '',
+    alamat: '',
+    foto_profil_url: ''
   });
+  const [pendingFoto, setPendingFoto] = useState<File | null>(null);
 
   const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
@@ -34,7 +40,7 @@ export default function SiswaProfile() {
     setLoading(true);
     const { data, error } = await supabase
       .from('users')
-      .select('nama, nisn, tanggal_lahir, jenis_kelamin, nomor_hp')
+      .select('nama, nisn, tanggal_lahir, jenis_kelamin, nomor_hp, nama_wali, alamat, foto_profil_url')
       .eq('id', SISWA_ID)
       .single();
       
@@ -44,7 +50,10 @@ export default function SiswaProfile() {
         nisn: data.nisn || '',
         tanggal_lahir: data.tanggal_lahir || '',
         jenis_kelamin: data.jenis_kelamin || '',
-        nomor_hp: data.nomor_hp || ''
+        nomor_hp: data.nomor_hp || '',
+        nama_wali: data.nama_wali || '',
+        alamat: data.alamat || '',
+        foto_profil_url: data.foto_profil_url || ''
       });
     } else if (error) {
       console.error('Error fetching profile:', error);
@@ -52,7 +61,7 @@ export default function SiswaProfile() {
     setLoading(false);
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -84,21 +93,17 @@ export default function SiswaProfile() {
     e.preventDefault();
     setSaving(true);
     setMessage({ type: '', text: '' });
-    
-    const { error } = await supabase
-      .from('users')
-      .update({
-        tanggal_lahir: formData.tanggal_lahir || null,
-        jenis_kelamin: formData.jenis_kelamin || null,
-        nomor_hp: formData.nomor_hp || null
-      })
-      .eq('id', SISWA_ID);
-      
-    if (error) {
-      console.error('Error saving profile:', error);
-      setMessage({ type: 'error', text: 'Gagal menyimpan profil: ' + error.message });
-    } else {
+
+    try {
+      await updateProfile(
+        { tanggal_lahir: formData.tanggal_lahir, jenis_kelamin: formData.jenis_kelamin, nomor_hp: formData.nomor_hp, nama_wali: formData.nama_wali, alamat: formData.alamat },
+        pendingFoto
+      );
       setMessage({ type: 'success', text: 'Profil berhasil diperbarui!' });
+      setPendingFoto(null);
+      fetchProfile();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: 'Gagal menyimpan profil: ' + (err?.message || err) });
     }
     setSaving(false);
   };
@@ -119,6 +124,11 @@ export default function SiswaProfile() {
       )}
 
       <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Foto Profil</label>
+          <PhotoUpload value={formData.foto_profil_url} onFileChange={setPendingFoto} label="Foto Profil" />
+        </div>
+
         <div className="form-group">
           <label>Nama Lengkap (Tidak bisa diubah)</label>
           <input 
@@ -181,6 +191,30 @@ export default function SiswaProfile() {
             onChange={handleChange} 
             className="form-control" 
             placeholder="Contoh: 0812..."
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Nama Wali</label>
+          <input
+            type="text"
+            name="nama_wali"
+            value={formData.nama_wali}
+            onChange={handleChange}
+            className="form-control"
+            placeholder="Nama orang tua / wali"
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Alamat Lengkap</label>
+          <textarea
+            name="alamat"
+            value={formData.alamat}
+            onChange={handleChange}
+            className="form-control"
+            rows={3}
+            placeholder="Alamat tempat tinggal saat ini"
           />
         </div>
         

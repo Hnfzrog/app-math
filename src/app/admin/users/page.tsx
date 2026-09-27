@@ -2,29 +2,40 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
+import { generateKopPdf } from '@/lib/pdf';
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Tabs: 'siswa', 'guru', 'admin'
+  const [activeTab, setActiveTab] = useState('siswa');
+  
+  // Modal states
   const [showModal, setShowModal] = useState(false);
   const [nama, setNama] = useState('');
   const [nisn, setNisn] = useState('');
-  const [role, setRole] = useState('guru');
+  const [role, setRole] = useState('siswa');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [tahunAjaran, setTahunAjaran] = useState('2026/2027');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   
   const [allClasses, setAllClasses] = useState<any[]>([]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+  
+  // Filter states
+  const [filterTahun, setFilterTahun] = useState('');
+  const [filterKelas, setFilterKelas] = useState('');
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [activeTab]);
 
   const fetchUsers = async () => {
     setLoading(true);
-    const { data: usersData, error } = await supabase.from('users').select('*').order('created_at', { ascending: false });
+    const { data: usersData, error } = await supabase.from('users').select('*').eq('role', activeTab).order('nama', { ascending: true });
     
     // Fetch associations
     const { data: guruKelas } = await supabase.from('guru_kelas').select('guru_id, kelas_id');
@@ -43,11 +54,11 @@ export default function AdminUsers() {
         if (u.role === 'guru') {
           const classIds = guruKelas?.filter(g => g.guru_id === u.id).map(g => g.kelas_id) || [];
           const classNames = classIds.map(id => classMap[id]).filter(Boolean);
-          if (classNames.length > 0) kelasText = `Kelas ${classNames.join(', ')}`;
+          if (classNames.length > 0) kelasText = classNames.join(', ');
         } else if (u.role === 'siswa') {
           const classIds = siswaKelas?.filter(s => s.siswa_id === u.id).map(s => s.kelas_id) || [];
           const classNames = classIds.map(id => classMap[id]).filter(Boolean);
-          if (classNames.length > 0) kelasText = `Kelas ${classNames.join(', ')}`;
+          if (classNames.length > 0) kelasText = classNames.join(', ');
         }
         return { ...u, detail_kelas: kelasText };
       });
@@ -81,13 +92,13 @@ export default function AdminUsers() {
     setConfirmDeleteId(null);
   };
 
-
   const handleEdit = async (user: any) => {
     setEditingId(user.id);
     setNama(user.nama);
     setNisn(user.nisn || '');
     setEmail(user.email || '');
     setRole(user.role);
+    setTahunAjaran(user.tahun_ajaran || '2026/2027');
     
     // Load existing classes for this user
     let userClasses: string[] = [];
@@ -109,17 +120,16 @@ export default function AdminUsers() {
       let targetUserId = editingId;
       
       if (editingId) {
-        // Edit User — update profil
         const { error } = await supabase.from('users').update({
           nama,
           nisn: role === 'siswa' ? nisn : null,
           email,
-          role
+          role,
+          tahun_ajaran: role !== 'admin' ? tahunAjaran : null
         }).eq('id', editingId);
         
         if (error) { customAlert('Gagal update user: ' + error.message, true); return; }
 
-        // Ganti password jika diisi
         if (password) {
           const res = await fetch('/api/admin/update-password', {
             method: 'POST',
@@ -130,11 +140,10 @@ export default function AdminUsers() {
           if (!res.ok) { customAlert('Gagal ganti password: ' + json.error, true); return; }
         }
       } else {
-        // Buat user via server-side API Route (pakai auth.admin untuk penuhi FK constraint)
         const res = await fetch('/api/admin/create-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nama, email, password, role, nisn }),
+          body: JSON.stringify({ nama, email, password, role, nisn, tahun_ajaran: role !== 'admin' ? tahunAjaran : null }),
         });
         const json = await res.json();
         if (!res.ok) {
@@ -149,10 +158,8 @@ export default function AdminUsers() {
         const table = role === 'guru' ? 'guru_kelas' : 'siswa_kelas';
         const idCol = role === 'guru' ? 'guru_id' : 'siswa_id';
         
-        // Hapus mapping lama
         await supabase.from(table).delete().eq(idCol, targetUserId);
         
-        // Insert mapping baru
         if (selectedClasses.length > 0) {
           const insertData = selectedClasses.map(kelas_id => ({
             [idCol]: targetUserId,
@@ -163,12 +170,6 @@ export default function AdminUsers() {
       }
       
       setShowModal(false);
-      setNama('');
-      setNisn('');
-      setEmail('');
-      setRole('guru');
-      setEditingId(null);
-      setSelectedClasses([]);
       fetchUsers();
     }
   };
@@ -181,29 +182,23 @@ export default function AdminUsers() {
 
   const generateEmail = (namaVal: string, nisnVal: string, roleVal: string) => {
     const words = namaVal.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    // Ambil 2 kata pertama (atau 1 jika nama cuma 1 kata)
     const prefix = words.slice(0, 2).join('').replace(/[^a-z0-9]/g, '');
     if (!prefix) return '';
     if (roleVal === 'siswa') {
       const nisnSuffix = nisnVal.trim().slice(-3);
       return nisnSuffix ? `${prefix}${nisnSuffix}@gmail.com` : '';
     }
-    // guru: 2 kata pertama nama
     return `${prefix}@gmail.com`;
   };
 
   const handleNamaChange = (val: string) => {
     setNama(val);
-    if (!editingId) {
-      setEmail(generateEmail(val, nisn, role));
-    }
+    if (!editingId) setEmail(generateEmail(val, nisn, role));
   };
 
   const handleNisnChange = (val: string) => {
     setNisn(val);
-    if (!editingId) {
-      setEmail(generateEmail(nama, val, role));
-    }
+    if (!editingId) setEmail(generateEmail(nama, val, role));
   };
 
   const bukaModalBaru = () => {
@@ -211,67 +206,186 @@ export default function AdminUsers() {
     setNama('');
     setNisn('');
     setEmail('');
-    setRole('guru');
+    setRole(activeTab);
     setPassword('');
+    setTahunAjaran('2026/2027');
     setSelectedClasses([]);
     setShowModal(true);
   };
 
+  const printPdf = async () => {
+    let columns: string[] = [];
+    let rows: (string | number)[][] = [];
+    let title = '';
+    let filename = '';
+
+    if (activeTab === 'siswa') {
+      title = `Daftar Peserta Didik ${filterKelas ? 'Kelas ' + filterKelas + ' ' : ''}Tahun Ajaran ${filterTahun || 'Semua'}`;
+      columns = ['No', 'Nama Siswa', 'NISN', 'No. Telp', 'Nama Wali', 'Alamat'];
+      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.nisn || '-', u.nomor_hp || '-', u.nama_wali || '-', u.alamat || '-']);
+      filename = 'daftar-peserta-didik.pdf';
+    } else if (activeTab === 'guru') {
+      title = `Daftar Guru Matematika Tahun Ajaran ${filterTahun || 'Semua'}`;
+      columns = ['No', 'Nama Guru', 'Kelas yang Diampu'];
+      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.detail_kelas || '-']);
+      filename = 'daftar-guru.pdf';
+    } else {
+      title = 'Daftar Admin';
+      columns = ['No', 'Nama Admin', 'Email'];
+      rows = filteredUsers.map((u, i) => [i + 1, u.nama, u.email || '-']);
+      filename = 'daftar-admin.pdf';
+    }
+
+    await generateKopPdf({ title, columns, rows, filename });
+  };
+
+  const filteredUsers = users.filter(u => {
+    if (filterTahun && u.tahun_ajaran !== filterTahun) return false;
+    if (filterKelas && !u.detail_kelas.includes(filterKelas)) return false;
+    return true;
+  });
+
   return (
-    <div className="card card-body">
-      <div className="table-controls">
-        <h3>Manajemen User (Pengguna)</h3>
-        <button className="btn btn-primary" onClick={bukaModalBaru}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 
-          Tambah User Baru
-        </button>
+    <div>
+      <div className="card card-body mb-4">
+        <h3 className="mb-3">Daftar Populasi (Kelola User)</h3>
+        
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>
+          {['siswa', 'guru', 'admin'].map(t => (
+            <button
+              key={t}
+              className={`btn ${activeTab === t ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => {
+                setActiveTab(t);
+                setFilterTahun('');
+                setFilterKelas('');
+              }}
+              style={{ textTransform: 'capitalize' }}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* Toolbar (Filters & Actions) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {activeTab !== 'admin' && (
+              <select className="form-control" style={{ width: 'auto' }} value={filterTahun} onChange={e => setFilterTahun(e.target.value)}>
+                <option value="">Semua Tahun Ajaran</option>
+                <option value="2025/2026">2025/2026</option>
+                <option value="2026/2027">2026/2027</option>
+              </select>
+            )}
+            {activeTab === 'siswa' && (
+              <select className="form-control" style={{ width: 'auto' }} value={filterKelas} onChange={e => setFilterKelas(e.target.value)}>
+                <option value="">Semua Kelas</option>
+                {allClasses.map(c => <option key={c.id} value={c.nama}>{c.nama}</option>)}
+              </select>
+            )}
+          </div>
+          
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button className="btn btn-secondary" onClick={printPdf}>
+              📄 Download / Print PDF
+            </button>
+            <button className="btn btn-primary" onClick={bukaModalBaru}>
+              + Tambah {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="table-responsive">
-        {loading ? (
-          <p className="text-center mt-3 mb-3">Loading data...</p>
-        ) : users.length === 0 ? (
-          <p className="text-center text-muted mt-3 mb-3">Belum ada data user.</p>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Nama</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Kelas Terkait</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(user => (
-                <tr key={user.id}>
-                  <td><strong>{user.nama}</strong></td>
-                  <td>{user.email}</td>
-                  <td>
-                    <span className={`badge ${user.role === 'guru' ? 'badge-primary' : (user.role === 'admin' ? 'badge-danger' : 'badge-info')}`}>
-                      {user.role}
-                    </span>
-                  </td>
-                  <td>{user.detail_kelas}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => handleEdit(user)} className="btn btn-sm btn-outline">Edit</button>
-                      <button onClick={() => hapusUser(user.id)} className="btn btn-sm btn-danger">Hapus</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      {/* Tabel */}
+      <div className="card card-body print-section">
+        <div className="table-responsive">
+          {loading ? (
+            <p className="text-center my-4">Loading data...</p>
+          ) : filteredUsers.length === 0 ? (
+            <p className="text-center text-muted my-4">Belum ada data.</p>
+          ) : (
+            <table className="table">
+              <thead>
+                {activeTab === 'siswa' && (
+                  <tr>
+                    <th>No</th>
+                    <th>Nama Siswa</th>
+                    <th>NISN</th>
+                    <th>Kelas</th>
+                    <th>No. Telp</th>
+                    <th>Nama Wali</th>
+                    <th>Alamat</th>
+                    <th>Aksi</th>
+                  </tr>
+                )}
+                {activeTab === 'guru' && (
+                  <tr>
+                    <th>No</th>
+                    <th>Nama Guru</th>
+                    <th>Kelas yg Diampu</th>
+                    <th>No. Telp</th>
+                    <th>Aksi</th>
+                  </tr>
+                )}
+                {activeTab === 'admin' && (
+                  <tr>
+                    <th>No</th>
+                    <th>Nama Admin</th>
+                    <th>Email</th>
+                    <th>Aksi</th>
+                  </tr>
+                )}
+              </thead>
+              <tbody>
+                {filteredUsers.map((user, idx) => (
+                  <tr key={user.id}>
+                    <td>{idx + 1}</td>
+                    <td><strong>{user.nama}</strong></td>
+                    
+                    {activeTab === 'siswa' && (
+                      <>
+                        <td>{user.nisn || '-'}</td>
+                        <td>{user.detail_kelas}</td>
+                        <td>{user.nomor_hp || '-'}</td>
+                        <td>{user.nama_wali || '-'}</td>
+                        <td>{user.alamat || '-'}</td>
+                      </>
+                    )}
+
+                    {activeTab === 'guru' && (
+                      <>
+                        <td>{user.detail_kelas}</td>
+                        <td>{user.nomor_hp || '-'}</td>
+                      </>
+                    )}
+
+                    {activeTab === 'admin' && (
+                      <>
+                        <td>{user.email}</td>
+                      </>
+                    )}
+
+                    <td>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => handleEdit(user)} className="btn btn-sm btn-outline">Edit</button>
+                        <button onClick={() => hapusUser(user.id)} className="btn btn-sm btn-danger">Hapus</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
+      {/* Modal Tambah/Edit */}
       {showModal && (
         <div className="modal-overlay">
           <div className="modal-dialog">
             <div className="modal-header">
-              <h3>{editingId ? 'Edit User' : 'Tambah User Baru'}</h3>
+              <h3>{editingId ? `Edit ${role}` : `Tambah ${role} Baru`}</h3>
               <button type="button" className="btn-close-modal" onClick={() => setShowModal(false)}>&times;</button>
             </div>
             <div className="modal-body">
@@ -289,7 +403,7 @@ export default function AdminUsers() {
                 </div>
 
                 {role === 'siswa' && (
-                  <div className="form-group">
+                  <div className="form-group mt-3">
                     <label>NISN</label>
                     <input 
                       type="text" 
@@ -301,18 +415,21 @@ export default function AdminUsers() {
                   </div>
                 )}
 
-                <div className="form-group">
+                {role !== 'admin' && (
+                  <div className="form-group mt-3">
+                    <label>Tahun Ajaran</label>
+                    <select className="form-control" value={tahunAjaran} onChange={e => setTahunAjaran(e.target.value)}>
+                      <option value="2025/2026">2025/2026</option>
+                      <option value="2026/2027">2026/2027</option>
+                    </select>
+                  </div>
+                )}
+
+                <div className="form-group mt-3">
                   <label>
                     Email
                     {!editingId && role === 'siswa' && (
-                      <span style={{ fontWeight: 'normal', color: 'var(--text-muted, #888)', marginLeft: '6px', fontSize: '0.82em' }}>
-                        (otomatis: nama depan + 3 digit NISN terakhir)
-                      </span>
-                    )}
-                    {!editingId && role !== 'siswa' && (
-                      <span style={{ fontWeight: 'normal', color: 'var(--text-muted, #888)', marginLeft: '6px', fontSize: '0.82em' }}>
-                        (isi manual)
-                      </span>
+                      <span className="text-muted text-sm ml-2">(otomatis)</span>
                     )}
                   </label>
                   <input 
@@ -320,14 +437,14 @@ export default function AdminUsers() {
                     className="form-control"
                     value={email} 
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="contoh: budi123@gmail.com"
+                    placeholder="contoh: budi@gmail.com"
                     required
                   />
                 </div>
 
-                <div className="form-group">
+                <div className="form-group mt-3">
                   <label>
-                    Password{editingId && <span style={{ fontWeight: 'normal', color: 'var(--text-muted, #888)', marginLeft: '6px', fontSize: '0.85em' }}>(kosongkan jika tidak diganti)</span>}
+                    Password{editingId && <span className="text-muted text-sm ml-2">(kosongkan jika tidak diganti)</span>}
                   </label>
                   <input 
                     type="password" 
@@ -340,25 +457,8 @@ export default function AdminUsers() {
                   />
                 </div>
                 
-                <div className="form-group">
-                  <label>Role User</label>
-                  <select 
-                    className="form-control"
-                    value={role} 
-                    onChange={(e) => {
-                      setRole(e.target.value);
-                      setSelectedClasses([]);
-                    }}
-                    required
-                  >
-                    <option value="guru">Guru</option>
-                    <option value="siswa">Siswa</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-                
                 {role !== 'admin' && (
-                  <div className="form-group">
+                  <div className="form-group mt-3">
                     <label>Pilih Kelas ({role === 'guru' ? 'Mengajar di' : 'Siswa di'})</label>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '150px', overflowY: 'auto', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }}>
                       {allClasses.map(kelas => (
@@ -371,7 +471,6 @@ export default function AdminUsers() {
                           {kelas.nama}
                         </label>
                       ))}
-                      {allClasses.length === 0 && <span className="text-muted text-sm">Belum ada kelas. Buat di Master Kelas dulu.</span>}
                     </div>
                   </div>
                 )}
@@ -391,11 +490,11 @@ export default function AdminUsers() {
         <div className="modal-overlay">
           <div className="modal-dialog" style={{ maxWidth: '400px' }}>
             <div className="modal-header">
-              <h3 style={{ color: 'var(--danger, #dc3545)' }}>Konfirmasi Hapus</h3>
+              <h3 className="text-danger">Konfirmasi Hapus</h3>
               <button type="button" className="btn-close-modal" onClick={() => setConfirmDeleteId(null)}>&times;</button>
             </div>
             <div className="modal-body">
-              <p>Apakah kamu yakin ingin menghapus pengguna ini? Tindakan ini tidak bisa dibatalkan dan semua data terkait (termasuk nilai) akan ikut terhapus.</p>
+              <p>Yakin ingin menghapus pengguna ini? Tindakan ini tidak bisa dibatalkan.</p>
               <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
                 <button className="btn btn-outline" onClick={() => setConfirmDeleteId(null)}>Batal</button>
                 <button className="btn btn-danger" onClick={executeDelete}>Ya, Hapus</button>
@@ -404,6 +503,34 @@ export default function AdminUsers() {
           </div>
         </div>
       )}
+      
+      {/* CSS untuk menyembunyikan elemen saat Print (PDF Export Mock) */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .print-section, .print-section * {
+            visibility: visible;
+          }
+          .print-section {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          .print-section::before {
+            content: "DAFTAR ${activeTab.toUpperCase()} TAHUN AJARAN ${filterTahun || 'SEMUA'}";
+            display: block;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+          }
+          .btn, .table-controls { display: none !important; }
+          td:last-child, th:last-child { display: none !important; }
+        }
+      `}} />
     </div>
   );
 }

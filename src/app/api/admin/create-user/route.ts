@@ -9,7 +9,7 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: Request) {
   try {
-    const { nama, email, password, role, nisn } = await request.json();
+    const { nama, email, password, role, nisn, tahun_ajaran } = await request.json();
 
     if (!nama || !email || !password || !role) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 });
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       email,
       password,
       email_confirm: true, // langsung confirmed, tidak perlu verifikasi email
-      user_metadata: { nama, role },
+      user_metadata: { nama, role, tahun_ajaran },
     });
 
     if (authError) {
@@ -39,6 +39,7 @@ export async function POST(request: Request) {
         email,
         role,
         nisn: role === 'siswa' ? nisn : null,
+        tahun_ajaran: role !== 'admin' ? tahun_ajaran : null,
       });
 
     if (profileError) {

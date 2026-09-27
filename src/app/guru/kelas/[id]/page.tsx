@@ -2,18 +2,26 @@
 import { useState, use, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
+import PhotoUpload from '@/components/PhotoUpload';
+import { uploadFile, fileUrl } from '@/lib/uploadClient';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import Link from 'next/link';
 
 export default function GuruKelasDetail({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = use(params);
   const kelasId = unwrappedParams.id;
+  const { userId } = useCurrentUser();
   
-  // Dari halaman daftar kelas, kita sekarang mengirimkan ID (UUID) asli dari tabel kelas.
   const [realKelasId, setRealKelasId] = useState<string | null>(kelasId);
   const [kelasNama, setKelasNama] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'materi' | 'siswa' | 'forum'>('materi');
 
   const [babs, setBabs] = useState<any[]>([]);
   const [materi, setMateri] = useState<Record<string, any[]>>({});
+  const [siswaList, setSiswaList] = useState<any[]>([]);
+  const [forumBabId, setForumBabId] = useState('');
+  const [forumMessages, setForumMessages] = useState<any[]>([]);
+  const [newPost, setNewPost] = useState('');
   const [loading, setLoading] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
@@ -21,6 +29,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [formTipe, setFormTipe] = useState('emateri');
   const [formJudul, setFormJudul] = useState('');
   const [formLink, setFormLink] = useState('');
+  const [formDeadline, setFormDeadline] = useState('');
+  const [formFile, setFormFile] = useState<File | null>(null);
   const [editModeId, setEditModeId] = useState<string | null>(null);
   const [confirmDeleteMateriId, setConfirmDeleteMateriId] = useState<string | null>(null);
   const [confirmDeleteBabId, setConfirmDeleteBabId] = useState<string | null>(null);
@@ -36,6 +46,9 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [kunciUraian, setKunciUraian] = useState('');
   const [opsiPG, setOpsiPG] = useState(['', '', '', '']);
   const [kunciPG, setKunciPG] = useState<number[]>([0]);
+  const [butuhUpload, setButuhUpload] = useState(false);
+  const [lampiranFile, setLampiranFile] = useState<File | null>(null);
+  const [lampiranLink, setLampiranLink] = useState('');
 
   useEffect(() => {
     fetchDataKelas();
@@ -43,18 +56,17 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
 
   const fetchDataKelas = async () => {
     setLoading(true);
-    // Kita langsung gunakan kelasId karena sekarang sudah berupa UUID dari database
     setRealKelasId(kelasId);
     
     // Fetch nama kelas
     const { data: dataKelas } = await supabase.from('kelas').select('nama').eq('id', kelasId).single();
     if (dataKelas) setKelasNama(dataKelas.nama);
     
-    // 2. Fetch data Bab
+    // Fetch data Bab
     const { data: babsData } = await supabase.from('bab').select('*').eq('kelas_id', kelasId).order('nomor', { ascending: true });
     if (babsData) setBabs(babsData);
 
-    // 3. Tarik data Konten untuk tiap bab
+    // Fetch data Konten untuk tiap bab
     const materiMap: Record<string, any[]> = {};
     if (babsData) {
       for (const bab of babsData) {
@@ -63,7 +75,35 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       }
     }
     setMateri(materiMap);
+
+    // Fetch daftar siswa
+    const { data: siswaData } = await supabase
+      .from('siswa_kelas')
+      .select('users(id, nama, email, nisn, nomor_hp)')
+      .eq('kelas_id', kelasId);
+    
+    if (siswaData) {
+      // @ts-ignore
+      setSiswaList(siswaData.map(s => s.users).filter(Boolean));
+    }
+
     setLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'forum' && forumBabId) {
+      supabase.from('forum_belajar').select('*, users:user_id(nama, role)').eq('bab_id', forumBabId).order('created_at')
+        .then(({ data }) => setForumMessages(data || []));
+    }
+  }, [activeTab, forumBabId]);
+
+  const kirimPost = async () => {
+    if (!newPost.trim() || !forumBabId || !userId) return;
+    const { error } = await supabase.from('forum_belajar').insert({ bab_id: forumBabId, user_id: userId, pesan: newPost.trim() });
+    if (error) { customAlert('Gagal kirim: ' + error.message, true); return; }
+    setNewPost('');
+    const { data } = await supabase.from('forum_belajar').select('*, users:user_id(nama, role)').eq('bab_id', forumBabId).order('created_at');
+    setForumMessages(data || []);
   };
 
   const handleTambahBab = () => {
@@ -90,6 +130,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setFormTipe('emateri');
     setFormJudul('');
     setFormLink('');
+    setFormDeadline('');
     setSoalList([]);
     setShowModal(true);
   };
@@ -102,8 +143,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       setFormTipe(m.tipe);
       setFormJudul(m.judul);
       setFormLink(m.file_url || '');
+      setFormDeadline(m.deadline ? m.deadline.slice(0, 16) : '');
       
-      // Ambil soal yang sudah ada jika tipe kuis
       if (m.tipe !== 'emateri') {
         const { data: soal } = await supabase.from('soal').select('*').eq('konten_id', materiId);
         setSoalList(soal || []);
@@ -151,7 +192,6 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     }
     const newOpsi = opsiPG.filter((_, i) => i !== index);
     setOpsiPG(newOpsi);
-    // Adjust kunciPG indexes after removal
     const newKunci = kunciPG
       .filter(k => k !== index)
       .map(k => k > index ? k - 1 : k);
@@ -181,13 +221,19 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     const soalBaru = {
       tipe: tipeSoal,
       pertanyaan: tipeSoal === 'pg' ? `${pertanyaan}|||${JSON.stringify(opsiPG)}|||${isMultiple}` : pertanyaan,
-      kunci_jawaban: tipeSoal === 'pg' ? JSON.stringify(kunciPG.map(idx => opsiPG[idx])) : kunciUraian
+      kunci_jawaban: tipeSoal === 'pg' ? JSON.stringify(kunciPG.map(idx => opsiPG[idx])) : kunciUraian,
+      butuh_upload: butuhUpload,
+      lampiran_file: lampiranFile,
+      lampiran_link: lampiranLink
     };
     setSoalList([...soalList, soalBaru]);
     setPertanyaan('');
     setKunciUraian('');
     setOpsiPG(['', '', '', '']);
     setKunciPG([0]);
+    setButuhUpload(false);
+    setLampiranFile(null);
+    setLampiranLink('');
   };
 
   const insertSymbol = (symbol: string) => {
@@ -210,10 +256,10 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     if (!formJudul.trim()) return false;
     
     if (formTipe === 'emateri') {
-      if (!formLink.trim()) return false;
+      if (!formLink.trim() && !formFile) return false;
     } else {
       if (soalList.length === 0) return false;
-      if (pertanyaan.trim().length > 0) return false; // Memaksa guru klik simpan soal dulu kalau ada ketikan
+      if (pertanyaan.trim().length > 0) return false;
     }
     
     return true;
@@ -223,9 +269,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     e.preventDefault();
     if (!activeBabId || !formJudul) return;
     
-    // Validasi: Kalau tipe kuis/lkpd, pastikan minimal ada 1 soal yang udah disave ke daftar
     if (formTipe !== 'emateri' && soalList.length === 0) {
-      // Cek apakah user sedang ngetik soal tapi lupa klik "Simpan Soal"
       if (pertanyaan.trim().length > 0) {
         customAlert('Kamu belum menyimpan soal yang sedang diketik! Klik "Simpan Soal ke Daftar" terlebih dahulu.', true);
       } else {
@@ -234,30 +278,37 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       return;
     }
     
+    let fileUrl: string | null = formLink || null;
+    if (formTipe === 'emateri' && formFile) {
+      try {
+        fileUrl = await uploadFile(formFile, 'materi');
+      } catch (e: any) {
+        customAlert('Gagal upload file materi: ' + (e?.message || e), true);
+        return;
+      }
+    }
+
     let kontenIdToUse = editModeId;
 
     if (editModeId) {
-      // 1. Update KONTEN
       const { error: errKonten } = await supabase.from('konten').update({
         tipe: formTipe,
         judul: formJudul,
-        file_url: formLink || null
+        file_url: fileUrl,
+        deadline: formDeadline ? new Date(formDeadline).toISOString() : null
       }).eq('id', editModeId);
 
       if (errKonten) {
         customAlert('Gagal mengupdate konten!', true);
         return;
       }
-      
-      // Hapus soal lama dan replace (Workaround MVP)
-      // KITA TIDAK LAGI MENGHAPUS SEMUA SOAL, karena bisa error FK constraint jika sudah ada jawaban siswa.
     } else {
-      // 1. Insert KONTEN
       const { data: newKonten, error: errKonten } = await supabase.from('konten').insert({
         bab_id: activeBabId,
         tipe: formTipe,
         judul: formJudul,
-        file_url: formLink || null
+        file_url: fileUrl,
+        deadline: formDeadline ? new Date(formDeadline).toISOString() : null
       }).select().single();
 
       if (errKonten || !newKonten) {
@@ -267,21 +318,39 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       kontenIdToUse = newKonten.id;
     }
 
-    // 2. Insert/Update SOAL
     if (kontenIdToUse && formTipe !== 'emateri') {
-      const soalBaru = soalList.filter(s => !s.id).map(s => ({
+      // Upload lampiran soal (jika guru memilih file baru)
+      const soalDenganLampiran: any[] = [];
+      for (const s of soalList) {
+        let lampiranUrl = s.lampiran_url || s.lampiran_link || null;
+        if (s.lampiran_file) {
+          try {
+            lampiranUrl = await uploadFile(s.lampiran_file, 'soal');
+          } catch (e: any) {
+            customAlert('Gagal upload lampiran soal: ' + (e?.message || e), true);
+            return;
+          }
+        }
+        soalDenganLampiran.push({ ...s, lampiran_url: lampiranUrl });
+      }
+
+      const soalBaru = soalDenganLampiran.filter(s => !s.id).map(s => ({
         konten_id: kontenIdToUse,
         pertanyaan: s.pertanyaan,
         tipe: s.tipe,
-        kunci_jawaban: s.kunci_jawaban
+        kunci_jawaban: s.kunci_jawaban,
+        butuh_upload: !!s.butuh_upload,
+        lampiran_url: s.lampiran_url || null
       }));
-      
-      const soalLama = soalList.filter(s => s.id).map(s => ({
+
+      const soalLama = soalDenganLampiran.filter(s => s.id).map(s => ({
         id: s.id,
         konten_id: kontenIdToUse,
         pertanyaan: s.pertanyaan,
         tipe: s.tipe,
-        kunci_jawaban: s.kunci_jawaban
+        kunci_jawaban: s.kunci_jawaban,
+        butuh_upload: !!s.butuh_upload,
+        lampiran_url: s.lampiran_url || null
       }));
 
       if (soalBaru.length > 0) {
@@ -305,6 +374,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setEditModeId(null);
     setFormJudul('');
     setFormLink('');
+    setFormDeadline('');
+    setFormFile(null);
     setSoalList([]);
     fetchDataKelas();
   };
@@ -314,51 +385,159 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       <div className="d-flex justify-between align-center mb-4">
         <div className="d-flex align-center gap-2">
           <Link href="/guru/kelas" className="btn btn-outline" style={{ padding: '0.5rem' }}>←</Link>
-          <h2 style={{ margin: 0 }}>Alur Tujuan Pembelajaran (ATP) - Kelas {kelasNama || '...'}</h2>
+          <h2 style={{ margin: 0 }}>Ruang Kelas - {kelasNama || '...'}</h2>
         </div>
-        <button onClick={handleTambahBab} disabled={!realKelasId} className="btn btn-primary">+ Tambah Bab (Topik)</button>
+        {activeTab === 'materi' && (
+          <button onClick={handleTambahBab} disabled={!realKelasId} className="btn btn-primary">+ Tambah Topik (Bab)</button>
+        )}
+      </div>
+      
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #ddd', paddingBottom: '10px', marginBottom: '20px' }}>
+        <button
+          className={`btn ${activeTab === 'materi' ? 'btn-primary' : 'btn-outline'}`}
+          onClick={() => setActiveTab('materi')}
+        >
+          Materi & Tugas (ATP)
+        </button>
+        <button
+          className={`btn ${activeTab === 'siswa' ? 'btn-primary' : 'btn-outline'}`}
+          onClick={() => setActiveTab('siswa')}
+        >
+          Daftar Siswa
+        </button>
+        <button
+          className={`btn ${activeTab === 'forum' ? 'btn-primary' : 'btn-outline'}`}
+          onClick={() => setActiveTab('forum')}
+        >
+          💬 Forum Belajar
+        </button>
       </div>
       
       {loading ? (
         <p className="text-center mt-4">Loading data...</p>
-      ) : babs.map((bab, index) => (
-        <div key={bab.id} className="card card-body mb-4">
-          <div className="d-flex justify-between align-center mb-3">
-            <h3 className="text-primary">
-              <span className="badge badge-info mr-2">{index + 1}</span>
-              {bab.judul}
-            </h3>
-            <div className="d-flex gap-2">
-              <button onClick={() => bukaModalTambah(bab.id)} className="btn btn-sm btn-outline">+ Tambah Modul/Kuis</button>
-              <button onClick={() => hapusBab(bab.id)} className="btn btn-sm btn-danger">Hapus Bab</button>
+      ) : activeTab === 'materi' ? (
+        <>
+          {babs.length === 0 ? (
+            <p className="text-center text-muted p-4 border rounded bg-light">Belum ada topik (bab) di kelas ini. Klik "Tambah Topik" untuk memulai.</p>
+          ) : babs.map((bab, index) => (
+            <div key={bab.id} className="card card-body mb-4">
+              <div className="d-flex justify-between align-center mb-3">
+                <h3 className="text-primary">
+                  <span className="badge badge-info mr-2">{index + 1}</span>
+                  {bab.judul}
+                </h3>
+                <div className="d-flex gap-2">
+                  <button onClick={() => bukaModalTambah(bab.id)} className="btn btn-sm btn-outline">+ Tambah Modul/Kuis</button>
+                  <button onClick={() => hapusBab(bab.id)} className="btn btn-sm btn-danger">Hapus Bab</button>
+                </div>
+              </div>
+              
+              {(!materi[bab.id] || materi[bab.id].length === 0) ? (
+                <p className="text-center text-muted p-3">Belum ada modul di topik ini.</p>
+              ) : (
+                <ul className="notif-list">
+                  {materi[bab.id].map(m => (
+                    <li key={m.id} className="notif-item d-flex justify-between align-center">
+                      <div>
+                        <strong className="d-block mb-1">
+                          {m.tipe === 'emateri' ? '📄' : (m.tipe === 'lkpd' ? '📝' : '📚')} {m.judul}
+                        </strong>
+                        <div className="d-flex align-center gap-2">
+                          <span className="badge badge-primary">{m.tipe.toUpperCase()}</span>
+                          {m.file_url && <a href={fileUrl(m.file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary text-sm underline">Lampiran</a>}
+                          {m.deadline && <span className="text-sm text-danger">⏰ {new Date(m.deadline).toLocaleString('id-ID')}</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <button onClick={() => bukaModalEdit(m.id, bab.id)} className="btn btn-sm btn-outline mr-2">Edit</button>
+                        <button onClick={() => hapusMateri(m.id)} className="btn btn-sm btn-danger">Hapus</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          </div>
-          
-          {(!materi[bab.id] || materi[bab.id].length === 0) ? (
-            <p className="text-center text-muted p-3">Belum ada modul di topik ini.</p>
+          ))}
+        </>
+      ) : activeTab === 'siswa' ? (
+        <div className="card card-body">
+          <h3 className="mb-4">Daftar Siswa Kelas {kelasNama}</h3>
+          {siswaList.length === 0 ? (
+            <p className="text-center text-muted">Belum ada siswa yang terdaftar di kelas ini.</p>
           ) : (
-            <ul className="notif-list">
-              {materi[bab.id].map(m => (
-                <li key={m.id} className="notif-item d-flex justify-between align-center">
-                  <div>
-                    <strong className="d-block mb-1">
-                      {m.tipe === 'emateri' ? '📄' : (m.tipe === 'lkpd' ? '📝' : '📚')} {m.judul}
-                    </strong>
-                    <div className="d-flex align-center gap-2">
-                      <span className="badge badge-primary">{m.tipe.toUpperCase()}</span>
-                      {m.file_url && <a href={m.file_url} target="_blank" rel="noopener noreferrer" className="text-primary text-sm underline">Lampiran</a>}
-                    </div>
-                  </div>
-                  <div>
-                    <button onClick={() => bukaModalEdit(m.id, bab.id)} className="btn btn-sm btn-outline mr-2">Edit</button>
-                    <button onClick={() => hapusMateri(m.id)} className="btn btn-sm btn-danger">Hapus</button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Nama Siswa</th>
+                    <th>NISN</th>
+                    <th>No. HP</th>
+                    <th>Email</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {siswaList.map((siswa, i) => (
+                    <tr key={siswa.id}>
+                      <td>{i + 1}</td>
+                      <td><strong>{siswa.nama}</strong></td>
+                      <td>{siswa.nisn || '-'}</td>
+                      <td>{siswa.nomor_hp || '-'}</td>
+                      <td>{siswa.email}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-      ))}
+      ) : (
+        <div className="card card-body">
+          <h3 className="mb-3">💬 Forum Belajar</h3>
+          <p className="text-muted" style={{ fontSize: '13px' }}>Diskusi per bab. Guru juga bisa ikut berdiskusi dengan siswa.</p>
+          <div className="form-group">
+            <label>Pilih Bab</label>
+            <select className="form-control" value={forumBabId} onChange={e => setForumBabId(e.target.value)}>
+              <option value="">-- Pilih Bab --</option>
+              {babs.map((b: any) => <option key={b.id} value={b.id}>{b.nomor}. {b.judul}</option>)}
+            </select>
+          </div>
+          {forumBabId && (
+            <>
+              <div className="d-flex flex-column gap-2 mt-3" style={{ maxHeight: '360px', overflowY: 'auto' }}>
+                {forumMessages.length === 0 ? (
+                  <p className="text-muted text-center my-3">Belum ada diskusi di bab ini.</p>
+                ) : (
+                  forumMessages.map((m: any) => (
+                    <div key={m.id} className="p-2 border rounded" style={{ background: 'var(--slate-50)' }}>
+                      <div className="d-flex justify-between align-center mb-1">
+                        <strong style={{ fontSize: '13px' }}>
+                          {m.users?.nama || 'Pengguna'}{' '}
+                          <span className="badge badge-info" style={{ fontSize: '10px' }}>{m.users?.role}</span>
+                        </strong>
+                        <small className="text-muted">{new Date(m.created_at).toLocaleString('id-ID')}</small>
+                      </div>
+                      <p className="m-0" style={{ fontSize: '14px' }}>{m.pesan}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="d-flex gap-2 mt-3">
+                <input
+                  type="text"
+                  className="form-control"
+                  value={newPost}
+                  onChange={e => setNewPost(e.target.value)}
+                  placeholder="Tulis pesan untuk siswa..."
+                  onKeyDown={e => { if (e.key === 'Enter') kirimPost(); }}
+                />
+                <button className="btn btn-primary" onClick={kirimPost} disabled={!newPost.trim()}>Kirim</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* MODAL BIKIN KONTEN */}
       {showModal && (
@@ -386,9 +565,29 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                 </div>
 
                 {formTipe === 'emateri' && (
+                  <>
+                    <div className="form-group">
+                      <label>Link / Isi Materi (G-Drive / YouTube)</label>
+                      <input type="url" className="form-control" value={formLink} onChange={e => setFormLink(e.target.value)} placeholder="https://..." />
+                    </div>
+                    <div className="form-group">
+                      <label>atau Upload File Materi (pdf/doc/ppt/gambar, maks 2MB)</label>
+                      <PhotoUpload
+                        value={null}
+                        onFileChange={setFormFile}
+                        onLinkChange={setFormLink}
+                        accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+                        showDrive
+                        label="File Materi"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {formTipe !== 'emateri' && (
                   <div className="form-group">
-                    <label>Link / Isi Materi (G-Drive / YouTube)</label>
-                    <input type="url" className="form-control" value={formLink} onChange={e => setFormLink(e.target.value)} placeholder="https://..." required />
+                    <label>Deadline (Tanggal & Jam)</label>
+                    <input type="datetime-local" className="form-control" value={formDeadline} onChange={e => setFormDeadline(e.target.value)} />
                   </div>
                 )}
 
@@ -461,9 +660,33 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                       </div>
                     )}
 
-                    <button 
-                      type="button" 
-                      onClick={handleSimpanSoalSementara} 
+                    <div className="form-group mt-3">
+                      <label className="d-flex align-center gap-2" style={{ cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={butuhUpload}
+                          onChange={e => setButuhUpload(e.target.checked)}
+                          style={{ transform: 'scale(1.2)' }}
+                        />
+                        <span>Soal ini wajib upload jawaban (foto/dokumen, maks 2MB)</span>
+                      </label>
+                    </div>
+
+                    <div className="form-group mt-3">
+                      <label>Lampiran Soal (opsional): gambar/dokumen untuk soal — maks 2MB</label>
+                      <PhotoUpload
+                        value={null}
+                        onFileChange={setLampiranFile}
+                        onLinkChange={setLampiranLink}
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                        showDrive
+                        label="Lampiran Soal"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSimpanSoalSementara}
                       disabled={!isSoalValid()}
                       className="btn btn-outline w-100"
                     >
@@ -482,7 +705,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                           {soalList.map((s, idx) => (
                             <div key={idx} className="d-flex justify-between p-2" style={{ borderBottom: '1px solid #eee' }}>
                               <div>
-                                <strong>Soal {idx+1}:</strong> {s.pertanyaan.split('|||')[0].substring(0, 30)}... <span className="badge badge-info">{s.tipe}</span>
+                                <strong>Soal {idx+1}:</strong> {s.pertanyaan.split('|||')[0].substring(0, 30)}... <span className="badge badge-info">{s.tipe}</span>{s.butuh_upload && <span className="badge badge-warning" style={{ marginLeft: '6px' }}>Wajib Upload</span>}{(s.lampiran_url || s.lampiran_file || s.lampiran_link) && <span className="badge badge-primary" style={{ marginLeft: '6px' }}>Ada Lampiran</span>}
                               </div>
                               <button type="button" onClick={() => hapusSoalSementara(idx)} className="text-danger" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>Hapus</button>
                             </div>

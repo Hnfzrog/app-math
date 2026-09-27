@@ -2,10 +2,15 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import PhotoUpload from '@/components/PhotoUpload';
+import { updateProfile } from '@/lib/uploadClient';
 
 export default function AdminProfile() {
   const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({ nama: '', email: '' });
+  const [formData, setFormData] = useState({ nama: '', email: '', nomor_hp: '', alamat: '', foto_profil_url: '' });
+  const [pendingFoto, setPendingFoto] = useState<File | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMessage, setProfileMessage] = useState({ type: '', text: '' });
 
   // State untuk ganti password
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' });
@@ -24,14 +29,41 @@ export default function AdminProfile() {
     setLoading(true);
     const { data } = await supabase
       .from('users')
-      .select('nama, email')
+      .select('nama, email, nomor_hp, alamat, foto_profil_url')
       .eq('id', ADMIN_ID)
       .single();
 
     if (data) {
-      setFormData({ nama: data.nama || '', email: data.email || '' });
+      setFormData({
+        nama: data.nama || '',
+        email: data.email || '',
+        nomor_hp: data.nomor_hp || '',
+        alamat: data.alamat || '',
+        foto_profil_url: data.foto_profil_url || ''
+      });
     }
     setLoading(false);
+  };
+
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ADMIN_ID) return;
+    
+    setSavingProfile(true);
+    setProfileMessage({ type: '', text: '' });
+
+    try {
+      await updateProfile(
+        { nama: formData.nama, nomor_hp: formData.nomor_hp, alamat: formData.alamat },
+        pendingFoto
+      );
+      setProfileMessage({ type: 'success', text: 'Profil berhasil diperbarui!' });
+      setPendingFoto(null);
+      fetchProfile();
+    } catch (err: any) {
+      setProfileMessage({ type: 'error', text: 'Gagal menyimpan profil: ' + (err?.message || err) });
+    }
+    setSavingProfile(false);
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -65,34 +97,74 @@ export default function AdminProfile() {
       {/* Info Akun */}
       <div className="card card-body" style={{ maxWidth: '600px', margin: '0 auto' }}>
         <h2 className="mb-4">Profil Admin</h2>
+        
+        {profileMessage.text && (
+          <div className={`alert ${profileMessage.type === 'success' ? 'alert-success' : 'alert-danger'}`}>
+            {profileMessage.text}
+          </div>
+        )}
 
-        <div className="form-group">
-          <label>Nama Lengkap</label>
-          <input
-            type="text"
-            value={formData.nama}
-            className="form-control"
-            readOnly
-            style={{ backgroundColor: 'var(--slate-100)', cursor: 'not-allowed', color: 'var(--slate-500)' }}
-          />
-        </div>
+        <form onSubmit={handleProfileUpdate}>
+          <div className="form-group">
+            <label>Email (Tidak bisa diubah)</label>
+            <input
+              type="email"
+              value={formData.email}
+              className="form-control"
+              readOnly
+              style={{ backgroundColor: 'var(--slate-100)', cursor: 'not-allowed', color: 'var(--slate-500)' }}
+            />
+          </div>
+          
+          <div className="form-group mt-3">
+            <label>Nama Lengkap</label>
+            <input
+              type="text"
+              value={formData.nama}
+              onChange={(e) => setFormData({...formData, nama: e.target.value})}
+              className="form-control"
+              required
+            />
+          </div>
 
-        <div className="form-group">
-          <label>Email</label>
-          <input
-            type="email"
-            value={formData.email}
-            className="form-control"
-            readOnly
-            style={{ backgroundColor: 'var(--slate-100)', cursor: 'not-allowed', color: 'var(--slate-500)' }}
-          />
-        </div>
+          <div className="form-group mt-3">
+            <label>No. Telepon</label>
+            <input
+              type="text"
+              value={formData.nomor_hp}
+              onChange={(e) => setFormData({...formData, nomor_hp: e.target.value})}
+              className="form-control"
+              placeholder="Contoh: 08123456789"
+            />
+          </div>
 
-        <div className="mt-3" style={{ padding: '12px', background: 'var(--slate-50)', borderRadius: '8px', border: '1px solid var(--slate-200)' }}>
-          <p className="text-muted" style={{ fontSize: '13px', margin: 0 }}>
-            ℹ️ Data akun admin hanya bisa diubah melalui panel Supabase atau oleh superadmin sistem.
-          </p>
-        </div>
+          <div className="form-group mt-3">
+            <label>Alamat</label>
+            <textarea
+              value={formData.alamat}
+              onChange={(e) => setFormData({...formData, alamat: e.target.value})}
+              className="form-control"
+              rows={3}
+              placeholder="Alamat lengkap"
+            ></textarea>
+          </div>
+          
+          <div className="form-group mt-3">
+            <label>Foto Profil</label>
+            <PhotoUpload value={formData.foto_profil_url} onFileChange={setPendingFoto} label="Foto Profil" />
+          </div>
+
+          <div className="mt-4" style={{ paddingTop: '1rem', borderTop: '1px solid var(--slate-200)' }}>
+            <button
+              type="submit"
+              disabled={savingProfile}
+              className="btn btn-primary"
+              style={{ width: '100%' }}
+            >
+              {savingProfile ? 'Menyimpan...' : 'Simpan Profil'}
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Ganti Password */}
@@ -131,7 +203,7 @@ export default function AdminProfile() {
             </div>
           </div>
 
-          <div className="form-group">
+          <div className="form-group mt-3">
             <label>Konfirmasi Password Baru</label>
             <input
               type={showPassword ? 'text' : 'password'}

@@ -1,3 +1,4 @@
+-- ⚠️ LEGACY (Marked 27 Sep 2026): stale seed (old kelas naming), superseded. Canonical: supabase_schema.sql.
 -- 1. EXTENSION PENGAMANAN & CRYPTO
 create extension if not exists pgcrypto;
 

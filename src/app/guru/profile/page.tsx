@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import PhotoUpload from '@/components/PhotoUpload';
+import { updateProfile } from '@/lib/uploadClient';
 
 export default function GuruProfile() {
   const [loading, setLoading] = useState(true);
@@ -12,7 +14,10 @@ export default function GuruProfile() {
     nama: '',
     email: '',
     nomor_hp: '',
+    alamat: '',
+    foto_profil_url: '',
   });
+  const [pendingFoto, setPendingFoto] = useState<File | null>(null);
 
   // State untuk ganti password
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' });
@@ -31,7 +36,7 @@ export default function GuruProfile() {
     setLoading(true);
     const { data, error } = await supabase
       .from('users')
-      .select('nama, email, nomor_hp')
+      .select('nama, email, nomor_hp, alamat, foto_profil_url')
       .eq('id', GURU_ID)
       .single();
 
@@ -40,6 +45,8 @@ export default function GuruProfile() {
         nama: data.nama || '',
         email: data.email || '',
         nomor_hp: data.nomor_hp || '',
+        alamat: data.alamat || '',
+        foto_profil_url: data.foto_profil_url || '',
       });
     } else if (error) {
       console.error('Error fetching profile:', error);
@@ -47,7 +54,7 @@ export default function GuruProfile() {
     setLoading(false);
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -56,15 +63,16 @@ export default function GuruProfile() {
     setSaving(true);
     setMessage({ type: '', text: '' });
 
-    const { error } = await supabase
-      .from('users')
-      .update({ nomor_hp: formData.nomor_hp || null })
-      .eq('id', GURU_ID);
-
-    if (error) {
-      setMessage({ type: 'error', text: 'Gagal menyimpan profil: ' + error.message });
-    } else {
+    try {
+      await updateProfile(
+        { nama: formData.nama, nomor_hp: formData.nomor_hp, alamat: formData.alamat },
+        pendingFoto
+      );
       setMessage({ type: 'success', text: 'Profil berhasil diperbarui!' });
+      setPendingFoto(null);
+      fetchProfile();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: 'Gagal menyimpan profil: ' + (err?.message || err) });
     }
     setSaving(false);
   };
@@ -109,18 +117,6 @@ export default function GuruProfile() {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Nama Lengkap (Tidak bisa diubah)</label>
-            <input
-              type="text"
-              name="nama"
-              value={formData.nama}
-              className="form-control"
-              readOnly
-              style={{ backgroundColor: 'var(--slate-100)', cursor: 'not-allowed', color: 'var(--slate-500)' }}
-            />
-          </div>
-
-          <div className="form-group">
             <label>Email (Tidak bisa diubah)</label>
             <input
               type="email"
@@ -132,8 +128,20 @@ export default function GuruProfile() {
             />
           </div>
 
-          <div className="form-group">
-            <label>Nomor HP</label>
+          <div className="form-group mt-3">
+            <label>Nama Lengkap</label>
+            <input
+              type="text"
+              name="nama"
+              value={formData.nama}
+              onChange={handleChange}
+              className="form-control"
+              required
+            />
+          </div>
+
+          <div className="form-group mt-3">
+            <label>Nomor HP / Telepon</label>
             <input
               type="text"
               name="nomor_hp"
@@ -142,6 +150,23 @@ export default function GuruProfile() {
               className="form-control"
               placeholder="Contoh: 0812..."
             />
+          </div>
+
+          <div className="form-group mt-3">
+            <label>Alamat</label>
+            <textarea
+              name="alamat"
+              value={formData.alamat}
+              onChange={handleChange}
+              className="form-control"
+              rows={3}
+              placeholder="Alamat lengkap"
+            ></textarea>
+          </div>
+          
+          <div className="form-group mt-3">
+            <label>Foto Profil</label>
+            <PhotoUpload value={formData.foto_profil_url} onFileChange={setPendingFoto} label="Foto Profil" />
           </div>
 
           <div className="mt-4" style={{ paddingTop: '1rem', borderTop: '1px solid var(--slate-200)' }}>

@@ -1,3 +1,4 @@
+-- ⚠️ LEGACY / DEV-ONLY — DO NOT APPLY TO PRODUCTION (Marked 27 Sep 2026). Canonical: supabase_schema.sql.
 -- SCRIPT DARURAT UNTUK DEMO (BYPASS RLS)
 -- Jalankan ini di SQL Editor Supabase agar semua tabel bisa dibaca & ditulis tanpa error.
 
