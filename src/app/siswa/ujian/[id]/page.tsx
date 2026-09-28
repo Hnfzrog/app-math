@@ -34,6 +34,8 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
   const [fotoLink, setFotoLink] = useState<Record<string, string>>({});
   const [showKonfirmasi, setShowKonfirmasi] = useState(false);
   const [hasilList, setHasilList] = useState<Record<string, any>>({});
+  // Feedback guru untuk ujian ini (satu arah: guru → siswa)
+  const [feedback, setFeedback] = useState<any>(null);
 
   useEffect(() => {
     if (userId) fetchUjianDetail();
@@ -96,6 +98,9 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
         setStep('hasil');
       }
     }
+
+    const { data: fb } = await supabase.from('ujian_feedback').select('*').eq('ujian_id', ujianId).eq('siswa_id', userId).maybeSingle();
+    if (fb) setFeedback(fb);
 
     setLoading(false);
   };
@@ -327,6 +332,16 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
             {ujian.jenis}{ujian.deskripsi ? ` — ${ujian.deskripsi}` : ''}
           </p>
         </div>
+
+        {feedback && (feedback.umpan_balik || feedback.file_url) && (
+          <div className="card card-body mb-4" style={{ borderLeft: '4px solid var(--primary)' }}>
+            <h3 className="mb-2" style={{ fontSize: '16px' }}>📝 Feedback Guru</h3>
+            {feedback.umpan_balik && <p className="mb-2" style={{ whiteSpace: 'pre-wrap' }}>{feedback.umpan_balik}</p>}
+            {feedback.file_url && (
+              <a href={fileUrl(feedback.file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat File Perbaikan</a>
+            )}
+          </div>
+        )}
 
         {soalList.map((soal, idx) => {
           const j = hasilList[soal.id];

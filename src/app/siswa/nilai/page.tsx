@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { fileUrl } from '@/lib/uploadClient';
 import { generateKopPdf } from '@/lib/pdf';
 
 export default function SiswaNilai() {
@@ -206,7 +207,12 @@ export default function SiswaNilai() {
                           ? <span className="badge badge-success">Sudah Dinilai</span>
                           : <span className="badge badge-warning">Belum</span>}
                       </td>
-                      <td>{n?.umpan_balik || '-'}</td>
+                      <td>
+                        {n?.umpan_balik || '-'}
+                        {n?.umpan_balik_file_url && (
+                          <div><a href={fileUrl(n.umpan_balik_file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary" style={{ fontSize: '13px' }}>📎 File Perbaikan</a></div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

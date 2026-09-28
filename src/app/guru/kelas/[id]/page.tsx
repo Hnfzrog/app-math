@@ -22,6 +22,10 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [forumBabId, setForumBabId] = useState('');
   const [forumMessages, setForumMessages] = useState<any[]>([]);
   const [newPost, setNewPost] = useState('');
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
   const [loading, setLoading] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
@@ -93,20 +97,100 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setLoading(false);
   };
 
+  const fetchForum = async (babId: string) => {
+    const { data } = await supabase.from('forum_belajar').select('*, users:user_id(nama, role)').eq('bab_id', babId).order('created_at');
+    setForumMessages(data || []);
+  };
+
   useEffect(() => {
     if (activeTab === 'forum' && forumBabId) {
-      supabase.from('forum_belajar').select('*, users:user_id(nama, role)').eq('bab_id', forumBabId).order('created_at')
-        .then(({ data }) => setForumMessages(data || []));
+      fetchForum(forumBabId);
     }
   }, [activeTab, forumBabId]);
 
-  const kirimPost = async () => {
-    if (!newPost.trim() || !forumBabId || !userId) return;
-    const { error } = await supabase.from('forum_belajar').insert({ bab_id: forumBabId, user_id: userId, pesan: newPost.trim() });
+  // Realtime forum: tambah/edit/hapus langsung tampil tanpa refresh.
+  useEffect(() => {
+    if (activeTab !== 'forum' || !forumBabId) return;
+    const channel = supabase.channel('guru-forum-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'forum_belajar', filter: `bab_id=eq.${forumBabId}` }, () => {
+        fetchForum(forumBabId);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeTab, forumBabId]);
+
+  const kirimPost = async (parentId: string | null = null) => {
+    const teks = parentId ? replyText : newPost;
+    if (!teks.trim() || !forumBabId || !userId) return;
+    const { error } = await supabase.from('forum_belajar').insert({ bab_id: forumBabId, user_id: userId, pesan: teks.trim(), parent_id: parentId });
     if (error) { customAlert('Gagal kirim: ' + error.message, true); return; }
-    setNewPost('');
-    const { data } = await supabase.from('forum_belajar').select('*, users:user_id(nama, role)').eq('bab_id', forumBabId).order('created_at');
-    setForumMessages(data || []);
+    if (parentId) { setReplyTo(null); setReplyText(''); }
+    else setNewPost('');
+    fetchForum(forumBabId);
+  };
+
+  const editPost = async (id: string) => {
+    if (!editText.trim()) return;
+    const { error } = await supabase.from('forum_belajar').update({ pesan: editText.trim(), edited_at: new Date().toISOString() }).eq('id', id);
+    if (error) customAlert('Gagal edit: ' + error.message, true);
+    setEditingId(null);
+    setEditText('');
+    fetchForum(forumBabId);
+  };
+
+  const hapusPost = async (id: string) => {
+    const { error } = await supabase.from('forum_belajar').update({ is_deleted: true }).eq('id', id);
+    if (error) customAlert('Gagal hapus: ' + error.message, true);
+    fetchForum(forumBabId);
+  };
+
+  const renderForumBubble = (m: any, isReply: boolean) => {
+    const own = m.user_id === userId;
+    if (m.is_deleted) {
+      return (
+        <div className="p-2 border rounded" style={{ background: 'var(--slate-50)', marginLeft: isReply ? '18px' : 0, color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>
+          (pesan dihapus)
+        </div>
+      );
+    }
+    return (
+      <div className="p-2 border rounded" style={{ background: own ? '#e0f2fe' : 'var(--slate-50)', marginLeft: isReply ? '18px' : 0 }}>
+        <div className="d-flex justify-between align-center mb-1" style={{ gap: '8px', flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: '13px' }}>
+            {m.users?.nama || 'Pengguna'}{' '}
+            <span className="badge badge-info" style={{ fontSize: '10px' }}>{m.users?.role}</span>
+          </strong>
+          <small className="text-muted">
+            {new Date(m.created_at).toLocaleString('id-ID')}
+            {m.edited_at && ' · diedit'}
+          </small>
+        </div>
+        {editingId === m.id ? (
+          <div className="d-flex gap-2 mt-1">
+            <input type="text" className="form-control form-control-sm" value={editText} onChange={e => setEditText(e.target.value)} onKeyDown={e => e.key === 'Enter' && editPost(m.id)} autoFocus />
+            <button className="btn btn-sm btn-primary" onClick={() => editPost(m.id)} disabled={!editText.trim()}>Simpan</button>
+            <button className="btn btn-sm btn-outline" onClick={() => setEditingId(null)}>Batal</button>
+          </div>
+        ) : (
+          <p className="m-0" style={{ fontSize: '14px', wordBreak: 'break-word' }}>{m.pesan}</p>
+        )}
+        <div className="d-flex gap-2 mt-2" style={{ justifyContent: 'flex-end' }}>
+          {!isReply && (
+            <button className="btn btn-sm btn-outline" onClick={() => setReplyTo(replyTo === m.id ? null : m.id)}>Balas</button>
+          )}
+          {own && editingId !== m.id && (
+            <button className="btn btn-sm btn-outline" onClick={() => { setEditingId(m.id); setEditText(m.pesan); }}>Edit</button>
+          )}
+          <button className="btn btn-sm btn-outline" style={{ color: 'var(--danger, #dc3545)' }} onClick={() => hapusPost(m.id)}>Hapus</button>
+        </div>
+        {replyTo === m.id && (
+          <div className="d-flex gap-2 mt-2">
+            <input type="text" className="form-control" value={replyText} onChange={e => setReplyText(e.target.value)} placeholder="Tulis balasan..." onKeyDown={e => { if (e.key === 'Enter') kirimPost(m.id); }} />
+            <button className="btn btn-primary" onClick={() => kirimPost(m.id)} disabled={!replyText.trim()}>Balas</button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleTambahBab = () => {
@@ -508,20 +592,18 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
           </div>
           {forumBabId && (
             <>
-              <div className="d-flex flex-column gap-2 mt-3" style={{ maxHeight: '360px', overflowY: 'auto' }}>
+              <div className="d-flex flex-column gap-2 mt-3" style={{ maxHeight: '400px', overflowY: 'auto' }}>
                 {forumMessages.length === 0 ? (
                   <p className="text-muted text-center my-3">Belum ada diskusi di bab ini.</p>
                 ) : (
-                  forumMessages.map((m: any) => (
-                    <div key={m.id} className="p-2 border rounded" style={{ background: 'var(--slate-50)' }}>
-                      <div className="d-flex justify-between align-center mb-1">
-                        <strong style={{ fontSize: '13px' }}>
-                          {m.users?.nama || 'Pengguna'}{' '}
-                          <span className="badge badge-info" style={{ fontSize: '10px' }}>{m.users?.role}</span>
-                        </strong>
-                        <small className="text-muted">{new Date(m.created_at).toLocaleString('id-ID')}</small>
-                      </div>
-                      <p className="m-0" style={{ fontSize: '14px' }}>{m.pesan}</p>
+                  forumMessages.filter((m: any) => !m.parent_id).map((m: any) => (
+                    <div key={m.id} className="d-flex flex-column gap-2">
+                      {renderForumBubble(m, false)}
+                      {forumMessages.filter((r: any) => r.parent_id === m.id).map((r: any) => (
+                        <div key={r.id} className="d-flex flex-column">
+                          {renderForumBubble(r, true)}
+                        </div>
+                      ))}
                     </div>
                   ))
                 )}
@@ -535,7 +617,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                   placeholder="Tulis pesan untuk siswa..."
                   onKeyDown={e => { if (e.key === 'Enter') kirimPost(); }}
                 />
-                <button className="btn btn-primary" onClick={kirimPost} disabled={!newPost.trim()}>Kirim</button>
+                <button className="btn btn-primary" onClick={() => kirimPost()} disabled={!newPost.trim()}>Kirim</button>
               </div>
             </>
           )}

@@ -136,7 +136,8 @@ Update grading logic. Add columns to `public.nilai`:
 - `skor_presensi` (numeric)
 - `nilai_akhir` (numeric) -> derived in DB (generated column/trigger): `(skor_benar * 0.9) + (skor_presensi * 0.1)`; not only client-side
 - `umpan_balik` (text)
-- `umpan_balik_foto_url` (text, PENDING)
+- `umpan_balik_foto_url` (text, PENDING) — disupersede oleh `umpan_balik_file_url`
+- `umpan_balik_file_url` (text) — file perbaikan umum (PDF/doc/xls/ppt/gambar) untuk feedback tugas per bab
 
 ### 9. `forum_belajar` Table (New)
 Table for discussion per chapter.
@@ -145,6 +146,9 @@ Table for discussion per chapter.
 - `user_id` (uuid, fk to users)
 - `pesan` (text)
 - `created_at` (timestamp)
+- `parent_id` (uuid, nullable, self-FK `ON DELETE CASCADE`) — balasan satu level (thread)
+- `edited_at` (timestamptz, nullable) — penanda "diedit"
+- `is_deleted` (boolean, NOT NULL, default `false`) — soft delete agar struktur thread utuh
 
 ### 10. `pengaturan` Table (New)
 School identity / config (single row, editable by admin).
@@ -169,6 +173,20 @@ Master hari (dinamis, dikelola admin) — dipakai sebagai kolom grid jadwal.
 - `nama` (text, unique)
 - `urutan` (integer)
 - `created_at` (timestamp)
+
+### 13. `ujian_feedback` Table (New)
+Feedback guru per siswa per ujian (satu arah guru → siswa).
+- `id` (uuid, pk)
+- `ujian_id` (uuid, fk to ujian, `ON DELETE CASCADE`)
+- `siswa_id` (uuid, fk to users, `ON DELETE CASCADE`)
+- `umpan_balik` (text) — feedback tulisan guru
+- `file_url` (text) — lampiran file perbaikan (PDF/doc/gambar atau link Drive)
+- `created_at` (timestamptz)
+- `updated_at` (timestamptz)
+- `UNIQUE (ujian_id, siswa_id)` — satu feedback per siswa per ujian
+
+Alur: guru menulis feedback + lampiran di halaman hasil ujian → disimpan ke `ujian_feedback`.
+Siswa membaca miliknya di halaman hasil ujian. Tidak ada insert policy untuk siswa (satu arah).
 
 ### Authoritative schema & RLS (decision 27 Sep 2026)
 - `supabase_schema.sql` is the single canonical schema; `supabase_v2_migration.sql` is its incremental equivalent; `supabase_complete_setup.sql` and `reset_and_seed.sql` are legacy/alternative.

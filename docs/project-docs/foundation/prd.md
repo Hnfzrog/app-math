@@ -100,6 +100,27 @@ Scope approved 28 Sep 2026.
 
 **Non-goal**: skor ujian tidak otomatis masuk tabel `nilai`/e-Rapor; unduh soal sebagai file; ambil soal dari Bank Soal.
 
+### Feedback, Forum & Kamera (28 Sep 2026)
+
+Scope approved 28 Sep 2026.
+
+**Bug fix — Kamera Presensi (`CameraCapture`)**
+1. Kamera blank hitam di mobile & desktop. Root cause: `facingMode: 'environment'` eksak (gagal di webcam depan laptop/PC), race condition pemasangan `srcObject` via `setTimeout(0)`, dan tidak ada `.play()` eksplisit.
+2. Perbaikan: `facingMode: { ideal: 'environment' }` (fallback ke kamera apa pun yang tersedia); pasang `srcObject` + panggil `.play()` via `useEffect`/callback-ref saat `<video>` ter-mount (bukan `setTimeout(0)`); error handling membedakan `NotAllowedError` (izin ditolak) vs `NotFoundError` (tanpa kamera).
+
+**Enhance — Forum Belajar (Diskusi per bab)**
+1. Balasan **satu level** (thread) — kolom `parent_id`.
+2. Penulis bisa **edit** (penanda "diedit") & **hapus** pesannya (soft delete). Guru pengampu kelas & admin bisa hapus pesan apa pun di kelasnya (moderasi).
+3. Realtime diperluas ke `INSERT` + `UPDATE` + `DELETE`.
+4. Notifikasi pesan baru: balasan → penulis pesan induk; post baru → guru pengampu kelas.
+
+**Feature — Feedback Hasil (tugas & ujian, satu arah guru → siswa)**
+1. Feedback = **tulisan + lampiran file perbaikan** (PDF/doc/xls/ppt/gambar), **satu arah** (guru kirim, siswa baca — tanpa balasan).
+2. **Tugas (per bab)**: `nilai` + kolom `umpan_balik_file_url` (file umum, menggantikan `umpan_balik_foto_url` yang image-only). Guru lampirkan file (bukan cuma foto); siswa lihat teks + link file di Nilai Saya.
+3. **Ujian (per siswa per ujian)**: tabel baru `ujian_feedback`. Guru tulis feedback + lampiran file di halaman hasil ujian; siswa lihat di halaman hasil ujian.
+
+**Non-goal**: feedback tidak dua arah; foto jawaban tetap DEFERRED.
+
 ### Deferred (photo — awaiting storage bucket)
 - Upload wiring for `foto_profil_url`, `presensi.foto_url`, `jawaban_ujian.foto_url`, `umpan_balik_foto_url`.
 - Profile photo (admin/guru/siswa), direct-camera presensi photo, per-question answer photo, umpan-balik photo.

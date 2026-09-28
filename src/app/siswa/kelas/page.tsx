@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { customAlert } from '@/lib/customAlert';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
@@ -26,6 +27,11 @@ export default function SiswaKelas() {
   const [forumMessages, setForumMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [sendingForum, setSendingForum] = useState(false);
+  // Balasan (satu level) + edit pesan sendiri
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
 
   const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
 
@@ -40,7 +46,7 @@ export default function SiswaKelas() {
     fetchForum(activeForum);
 
     const channel = supabase.channel('forum-changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'forum_belajar', filter: `bab_id=eq.${activeForum}` }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'forum_belajar', filter: `bab_id=eq.${activeForum}` }, () => {
         fetchForum(activeForum);
       })
       .subscribe();
@@ -94,26 +100,96 @@ export default function SiswaKelas() {
   const fetchForum = async (babId: string) => {
     const { data } = await supabase
       .from('forum_belajar')
-      .select('*, users:user_id(nama)')
+      .select('*, users:user_id(nama, role)')
       .eq('bab_id', babId)
       .order('created_at', { ascending: true });
     setForumMessages(data || []);
   };
 
-  const kirimPesanForum = async () => {
-    if (!activeForum || !newMessage.trim()) return;
+  const kirimPesanForum = async (parentId: string | null = null) => {
+    const teks = parentId ? replyText : newMessage;
+    if (!activeForum || !teks.trim()) return;
     setSendingForum(true);
 
-    await supabase.from('forum_belajar').insert({
+    const { error } = await supabase.from('forum_belajar').insert({
       bab_id: activeForum,
       user_id: SISWA_ID,
-      pesan: newMessage.trim()
+      pesan: teks.trim(),
+      parent_id: parentId,
     });
+    if (error) customAlert('Gagal kirim pesan: ' + error.message, true);
 
-    setNewMessage('');
+    if (parentId) { setReplyTo(null); setReplyText(''); }
+    else setNewMessage('');
     setSendingForum(false);
     // Realtime akan re-fetch otomatis, tp jaga-jaga fetch lagi
     fetchForum(activeForum);
+  };
+
+  const editPesanForum = async (id: string) => {
+    if (!activeForum || !editText.trim()) return;
+    const { error } = await supabase.from('forum_belajar').update({
+      pesan: editText.trim(),
+      edited_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) customAlert('Gagal edit pesan: ' + error.message, true);
+    setEditingId(null);
+    setEditText('');
+    fetchForum(activeForum);
+  };
+
+  const hapusPesanForum = async (id: string) => {
+    if (!activeForum) return;
+    const { error } = await supabase.from('forum_belajar').update({ is_deleted: true }).eq('id', id);
+    if (error) customAlert('Gagal hapus pesan: ' + error.message, true);
+    fetchForum(activeForum);
+  };
+
+  const renderForumBubble = (msg: any, isReply: boolean) => {
+    const own = msg.user_id === SISWA_ID;
+    if (msg.is_deleted) {
+      return (
+        <div style={{ marginLeft: isReply ? '18px' : 0, padding: '8px', borderRadius: '8px', border: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: '12px', fontStyle: 'italic', alignSelf: own ? 'flex-end' : 'flex-start', maxWidth: '90%' }}>
+          (pesan dihapus)
+        </div>
+      );
+    }
+    return (
+      <div style={{ background: own ? '#e0f2fe' : 'white', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', marginLeft: isReply ? '18px' : 0, alignSelf: own ? 'flex-end' : 'flex-start', maxWidth: '90%', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px', fontWeight: 'bold', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {msg.users?.nama || 'Anonim'}
+          {msg.users?.role === 'guru' && <span className="badge badge-info" style={{ fontSize: '10px' }}>Guru</span>}
+          <span style={{ fontWeight: 'normal' }}>• {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+          {msg.edited_at && <span style={{ fontWeight: 'normal', fontStyle: 'italic' }}>(diedit)</span>}
+        </div>
+        {editingId === msg.id ? (
+          <div className="d-flex gap-2 mt-1">
+            <input type="text" className="form-control form-control-sm" value={editText} onChange={e => setEditText(e.target.value)} onKeyDown={e => e.key === 'Enter' && editPesanForum(msg.id)} autoFocus />
+            <button className="btn btn-sm btn-primary" onClick={() => editPesanForum(msg.id)} disabled={!editText.trim()}>Simpan</button>
+            <button className="btn btn-sm btn-outline" onClick={() => setEditingId(null)}>Batal</button>
+          </div>
+        ) : (
+          <div style={{ wordBreak: 'break-word' }}>{msg.pesan}</div>
+        )}
+        <div className="d-flex gap-2 mt-1" style={{ justifyContent: 'flex-end' }}>
+          {!isReply && (
+            <button className="btn btn-sm btn-outline" style={{ fontSize: '11px' }} onClick={() => setReplyTo(replyTo === msg.id ? null : msg.id)}>Balas</button>
+          )}
+          {own && editingId !== msg.id && (
+            <>
+              <button className="btn btn-sm btn-outline" style={{ fontSize: '11px' }} onClick={() => { setEditingId(msg.id); setEditText(msg.pesan); }}>Edit</button>
+              <button className="btn btn-sm btn-outline" style={{ fontSize: '11px', color: 'var(--danger, #dc3545)' }} onClick={() => hapusPesanForum(msg.id)}>Hapus</button>
+            </>
+          )}
+        </div>
+        {replyTo === msg.id && (
+          <div className="d-flex gap-2 mt-2">
+            <input type="text" className="form-control form-control-sm" placeholder="Tulis balasan..." value={replyText} onChange={e => setReplyText(e.target.value)} onKeyDown={e => e.key === 'Enter' && kirimPesanForum(msg.id)} />
+            <button className="btn btn-sm btn-primary" onClick={() => kirimPesanForum(msg.id)} disabled={sendingForum || !replyText.trim()}>Balas</button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) return <div className="text-center mt-4">Loading data kelas...</div>;
@@ -203,30 +279,32 @@ export default function SiswaKelas() {
                     {activeForum === bab.id && (
                       <div className="mt-3 p-3 bg-slate-50 border rounded" style={{ fontSize: '14px' }}>
                         <h4 className="mb-2" style={{ fontSize: '14px' }}>Forum Diskusi (Bab {bab.nomor})</h4>
-                        <div style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ maxHeight: '260px', overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {forumMessages.length === 0 ? (
                             <p className="text-muted text-sm m-0">Belum ada pesan di forum ini. Jadilah yang pertama!</p>
                           ) : (
-                            forumMessages.map(msg => (
-                              <div key={msg.id} style={{ background: msg.user_id === SISWA_ID ? '#e0f2fe' : 'white', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', alignSelf: msg.user_id === SISWA_ID ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-                                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px', fontWeight: 'bold' }}>
-                                  {msg.users?.nama || 'Anonim'} <span style={{ fontWeight: 'normal' }}>• {new Date(msg.created_at).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</span>
-                                </div>
-                                <div style={{ wordBreak: 'break-word' }}>{msg.pesan}</div>
+                            forumMessages.filter((m: any) => !m.parent_id).map((msg: any) => (
+                              <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {renderForumBubble(msg, false)}
+                                {forumMessages.filter((r: any) => r.parent_id === msg.id).map((r: any) => (
+                                  <div key={r.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                                    {renderForumBubble(r, true)}
+                                  </div>
+                                ))}
                               </div>
                             ))
                           )}
                         </div>
                         <div className="d-flex gap-2">
-                          <input 
-                            type="text" 
-                            className="form-control form-control-sm" 
-                            placeholder="Tulis pesan..." 
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
+                            placeholder="Tulis pesan..."
                             value={newMessage}
                             onChange={e => setNewMessage(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && kirimPesanForum()}
                           />
-                          <button className="btn btn-sm btn-primary" onClick={kirimPesanForum} disabled={sendingForum || !newMessage.trim()}>Kirim</button>
+                          <button className="btn btn-sm btn-primary" onClick={() => kirimPesanForum()} disabled={sendingForum || !newMessage.trim()}>Kirim</button>
                         </div>
                       </div>
                     )}

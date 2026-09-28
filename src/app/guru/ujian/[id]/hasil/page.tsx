@@ -2,7 +2,7 @@
 import { use, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
-import { fileUrl } from '@/lib/uploadClient';
+import { uploadFile, fileUrl } from '@/lib/uploadClient';
 import Link from 'next/link';
 
 export default function GuruUjianHasil({ params }: { params: Promise<{ id: string }> }) {
@@ -20,6 +20,10 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
   const [nilaiEdit, setNilaiEdit] = useState<Record<string, string>>({});
   const [terpilih, setTerpilih] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // Feedback guru per siswa (ujian_feedback)
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, any>>({});
+  const [feedbackPendingFile, setFeedbackPendingFile] = useState<Record<string, File | null>>({});
+  const [feedbackLink, setFeedbackLink] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchData();
@@ -90,6 +94,12 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
     } else {
       setJawabanMap({});
     }
+
+    // Feedback guru per siswa (ujian_feedback)
+    const { data: fb } = await supabase.from('ujian_feedback').select('*').eq('ujian_id', ujianId);
+    const fbMap: Record<string, any> = {};
+    (fb || []).forEach((f: any) => { fbMap[f.siswa_id] = f; });
+    setFeedbackMap(fbMap);
 
     setLoading(false);
   };
@@ -249,6 +259,35 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
     customAlert(`${siswaIds.length} siswa berhasil divalidasi.`, false);
   };
 
+  const simpanFeedback = async (siswaId: string) => {
+    const current = feedbackMap[siswaId] || { umpan_balik: '', file_url: null };
+    let fileKey: string | null = current.file_url || null;
+    const pending = feedbackPendingFile[siswaId];
+    const link = feedbackLink[siswaId];
+    try {
+      if (pending) fileKey = await uploadFile(pending, 'ujian-feedback');
+      else if (link) fileKey = link;
+    } catch (e: any) {
+      customAlert('Gagal upload file feedback: ' + (e?.message || e), true);
+      return;
+    }
+    const { error } = await supabase.from('ujian_feedback').upsert({
+      ujian_id: ujianId,
+      siswa_id: siswaId,
+      umpan_balik: current.umpan_balik || '',
+      file_url: fileKey,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'ujian_id,siswa_id' });
+    if (error) { customAlert('Gagal simpan feedback: ' + error.message, true); return; }
+    customAlert('Feedback tersimpan.', false);
+    const { data: fb } = await supabase.from('ujian_feedback').select('*').eq('ujian_id', ujianId);
+    const fbMap: Record<string, any> = {};
+    (fb || []).forEach((f: any) => { fbMap[f.siswa_id] = f; });
+    setFeedbackMap(fbMap);
+    setFeedbackPendingFile(prev => ({ ...prev, [siswaId]: null }));
+    setFeedbackLink(prev => ({ ...prev, [siswaId]: '' }));
+  };
+
   if (loading) return <div className="p-4 text-center">Loading...</div>;
   if (!ujian) return <div className="p-4 text-center">Ujian tidak ditemukan.</div>;
 
@@ -321,6 +360,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
                     PG: {ringkas.pgBenar}/{ringkas.pgTotal} benar
                     {ringkas.esaiMenunggu > 0 && ` · ${ringkas.esaiMenunggu} esai perlu dikoreksi`}
                     {ringkas.rataRata != null && ` · Rata-rata: ${ringkas.rataRata.toFixed(1)}`}
+                    {(feedbackMap[siswa.id]?.umpan_balik || feedbackMap[siswa.id]?.file_url) && ' · 📝 ada feedback'}
                   </span>
                 ) : (
                   <span className="text-sm text-muted">belum mengerjakan</span>
@@ -424,6 +464,36 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
                         </div>
                       );
                     })}
+
+                    <div style={{ border: '1px solid var(--slate-200)', borderRadius: 'var(--radius-md)', padding: '0.9rem', marginTop: '0.9rem' }}>
+                      <p className="mb-2"><strong>Feedback Guru</strong> <small className="text-muted">(tulisan + file perbaikan, terlihat oleh siswa)</small></p>
+                      <textarea
+                        className="form-control mb-2"
+                        rows={2}
+                        placeholder="Catatan / perbaikan untuk siswa..."
+                        value={feedbackMap[siswa.id]?.umpan_balik || ''}
+                        onChange={e => setFeedbackMap(prev => ({ ...prev, [siswa.id]: { ...prev[siswa.id], umpan_balik: e.target.value } }))}
+                      />
+                      {feedbackMap[siswa.id]?.file_url && (
+                        <div className="mb-2">
+                          <a href={fileUrl(feedbackMap[siswa.id].file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat File Perbaikan</a>
+                        </div>
+                      )}
+                      <input
+                        type="file"
+                        className="form-control mb-2"
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                        onChange={e => setFeedbackPendingFile(prev => ({ ...prev, [siswa.id]: e.target.files?.[0] || null }))}
+                      />
+                      <input
+                        type="url"
+                        className="form-control mb-2"
+                        placeholder="atau link Google Drive (file besar)"
+                        value={feedbackLink[siswa.id] || ''}
+                        onChange={e => setFeedbackLink(prev => ({ ...prev, [siswa.id]: e.target.value }))}
+                      />
+                      <button className="btn btn-sm btn-primary" onClick={() => simpanFeedback(siswa.id)}>Simpan Feedback</button>
+                    </div>
 
                     <div style={{ textAlign: 'right' }}>
                       <button

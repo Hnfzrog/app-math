@@ -218,6 +218,67 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- 8c. UJIAN: hubungkan ke bab (UH → nilai per-bab)
 ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS bab_id uuid REFERENCES public.bab ON DELETE SET NULL;
 
+-- 10. Feedback, Forum & Kamera (28 Sep 2026)
+
+-- 10a. FORUM_BELAJAR: thread + edit + soft-delete
+ALTER TABLE public.forum_belajar ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES public.forum_belajar(id) ON DELETE CASCADE;
+ALTER TABLE public.forum_belajar ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+ALTER TABLE public.forum_belajar ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
+
+-- 10b. NILAI: file perbaikan umum
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS umpan_balik_file_url text;
+
+-- 10c. UJIAN_FEEDBACK: feedback guru per siswa per ujian
+CREATE TABLE IF NOT EXISTS public.ujian_feedback (
+  id uuid default uuid_generate_v4() primary key,
+  ujian_id uuid references public.ujian on delete cascade not null,
+  siswa_id uuid references public.users on delete cascade not null,
+  umpan_balik text,
+  file_url text,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  updated_at timestamptz,
+  unique (ujian_id, siswa_id)
+);
+ALTER TABLE public.ujian_feedback ENABLE ROW LEVEL SECURITY;
+
+-- 10d. NOTIFIKASI forum baru
+CREATE OR REPLACE FUNCTION public.notif_forum_baru()
+RETURNS trigger AS $$
+DECLARE parent_author uuid;
+BEGIN
+  IF NEW.parent_id IS NOT NULL THEN
+    SELECT user_id INTO parent_author FROM public.forum_belajar WHERE id = NEW.parent_id;
+    IF parent_author IS NOT NULL AND parent_author <> NEW.user_id THEN
+      INSERT INTO public.notifikasi (user_id, pesan)
+      VALUES (parent_author, 'Ada balasan baru di forum diskusi Anda.');
+    END IF;
+  ELSE
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT gk.guru_id, 'Ada pertanyaan baru di forum kelas Anda.'
+    FROM public.bab b
+    JOIN public.guru_kelas gk ON gk.kelas_id = b.kelas_id
+    WHERE b.id = NEW.bab_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_forum ON public.forum_belajar;
+CREATE TRIGGER trg_notif_forum AFTER INSERT ON public.forum_belajar FOR EACH ROW EXECUTE FUNCTION public.notif_forum_baru();
+
+-- 10e. NOTIFIKASI feedback ujian
+CREATE OR REPLACE FUNCTION public.notif_ujian_feedback()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.notifikasi (user_id, pesan)
+  VALUES (NEW.siswa_id, 'Guru memberi feedback untuk ujianmu. Cek halaman hasil ujian.');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_feedback ON public.ujian_feedback;
+CREATE TRIGGER trg_notif_ujian_feedback AFTER INSERT OR UPDATE ON public.ujian_feedback FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_feedback();
+
 -- 9. Verifikasi hasil migration
 SELECT table_name
 FROM information_schema.tables

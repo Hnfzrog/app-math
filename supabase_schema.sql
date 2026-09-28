@@ -529,3 +529,66 @@ CREATE TRIGGER trg_notif_ujian_terbit_upd AFTER UPDATE ON public.ujian FOR EACH 
 -- 33. UJIAN: hubungkan ke bab — UH masuk ke nilai per-bab (skor_benar); UTS/UAS bab_id = NULL.
 ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS bab_id uuid REFERENCES public.bab ON DELETE SET NULL;
 
+-- ==========================================
+-- UPDATE SCHEMA V4 (Feedback, Forum & Kamera — 28 Sep 2026)
+-- ==========================================
+
+-- 34. FORUM_BELAJAR: thread (balasan satu level) + edit + soft-delete
+ALTER TABLE public.forum_belajar ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES public.forum_belajar(id) ON DELETE CASCADE;
+ALTER TABLE public.forum_belajar ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+ALTER TABLE public.forum_belajar ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
+
+-- 35. NILAI: file perbaikan umum (PDF/doc/xls/ppt/gambar) — menggantikan umpan_balik_foto_url (image-only)
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS umpan_balik_file_url text;
+
+-- 36. UJIAN_FEEDBACK: feedback guru per siswa per ujian (satu arah guru → siswa)
+CREATE TABLE IF NOT EXISTS public.ujian_feedback (
+  id uuid default uuid_generate_v4() primary key,
+  ujian_id uuid references public.ujian on delete cascade not null,
+  siswa_id uuid references public.users on delete cascade not null,
+  umpan_balik text,
+  file_url text,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  updated_at timestamptz,
+  unique (ujian_id, siswa_id)
+);
+ALTER TABLE public.ujian_feedback ENABLE ROW LEVEL SECURITY;
+
+-- 37. NOTIFIKASI: forum baru (balasan → penulis induk; post baru → guru pengampu kelas)
+CREATE OR REPLACE FUNCTION public.notif_forum_baru()
+RETURNS trigger AS $$
+DECLARE parent_author uuid;
+BEGIN
+  IF NEW.parent_id IS NOT NULL THEN
+    SELECT user_id INTO parent_author FROM public.forum_belajar WHERE id = NEW.parent_id;
+    IF parent_author IS NOT NULL AND parent_author <> NEW.user_id THEN
+      INSERT INTO public.notifikasi (user_id, pesan)
+      VALUES (parent_author, 'Ada balasan baru di forum diskusi Anda.');
+    END IF;
+  ELSE
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT gk.guru_id, 'Ada pertanyaan baru di forum kelas Anda.'
+    FROM public.bab b
+    JOIN public.guru_kelas gk ON gk.kelas_id = b.kelas_id
+    WHERE b.id = NEW.bab_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_forum ON public.forum_belajar;
+CREATE TRIGGER trg_notif_forum AFTER INSERT ON public.forum_belajar FOR EACH ROW EXECUTE FUNCTION public.notif_forum_baru();
+
+-- 38. NOTIFIKASI: guru memberi feedback ujian → notif ke siswa
+CREATE OR REPLACE FUNCTION public.notif_ujian_feedback()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.notifikasi (user_id, pesan)
+  VALUES (NEW.siswa_id, 'Guru memberi feedback untuk ujianmu. Cek halaman hasil ujian.');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_ujian_feedback ON public.ujian_feedback;
+CREATE TRIGGER trg_notif_ujian_feedback AFTER INSERT OR UPDATE ON public.ujian_feedback FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_feedback();
+

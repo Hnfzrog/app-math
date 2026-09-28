@@ -265,6 +265,43 @@ CREATE POLICY "admin full forum_belajar" ON public.forum_belajar FOR ALL TO auth
 DROP POLICY IF EXISTS "forum_belajar insert" ON public.forum_belajar;
 CREATE POLICY "forum_belajar insert" ON public.forum_belajar FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 
+-- Penulis mengedit pesannya sendiri (forum_belajar).
+DROP POLICY IF EXISTS "forum_belajar update own" ON public.forum_belajar;
+CREATE POLICY "forum_belajar update own" ON public.forum_belajar FOR UPDATE TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- Guru pengampu kelas boleh moderasi (soft-delete) pesan apa pun di kelasnya.
+DROP POLICY IF EXISTS "guru moderate forum_belajar" ON public.forum_belajar;
+CREATE POLICY "guru moderate forum_belajar" ON public.forum_belajar FOR UPDATE TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.bab b JOIN public.guru_kelas gk ON gk.kelas_id = b.kelas_id WHERE b.id = forum_belajar.bab_id AND gk.guru_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.bab b JOIN public.guru_kelas gk ON gk.kelas_id = b.kelas_id WHERE b.id = forum_belajar.bab_id AND gk.guru_id = auth.uid()));
+
+-- Hapus: penulis sendiri, guru pengampu kelas bab tsb, atau admin.
+DROP POLICY IF EXISTS "forum_belajar delete" ON public.forum_belajar;
+CREATE POLICY "forum_belajar delete" ON public.forum_belajar FOR DELETE TO authenticated
+  USING (
+    user_id = auth.uid()
+    OR is_admin()
+    OR EXISTS (
+      SELECT 1 FROM public.bab b
+      JOIN public.guru_kelas gk ON gk.kelas_id = b.kelas_id
+      WHERE b.id = forum_belajar.bab_id AND gk.guru_id = auth.uid()
+    )
+  );
+
+-- ==========================================
+-- UJIAN_FEEDBACK (satu arah guru → siswa)
+-- ==========================================
+DROP POLICY IF EXISTS "ujian_feedback read own" ON public.ujian_feedback;
+CREATE POLICY "ujian_feedback read own" ON public.ujian_feedback FOR SELECT TO authenticated
+  USING (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "admin full ujian_feedback" ON public.ujian_feedback;
+CREATE POLICY "admin full ujian_feedback" ON public.ujian_feedback FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru manage ujian_feedback" ON public.ujian_feedback;
+CREATE POLICY "guru manage ujian_feedback" ON public.ujian_feedback FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM ujian u JOIN guru_kelas gk ON gk.kelas_id = u.kelas_id WHERE u.id = ujian_feedback.ujian_id AND gk.guru_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM ujian u JOIN guru_kelas gk ON gk.kelas_id = u.kelas_id WHERE u.id = ujian_feedback.ujian_id AND gk.guru_id = auth.uid()));
+
 -- ==========================================
 -- NOTIFIKASI
 -- ==========================================

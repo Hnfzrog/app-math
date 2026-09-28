@@ -3,8 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
-import PhotoUpload from '@/components/PhotoUpload';
-import { uploadImage, fileUrl } from '@/lib/uploadClient';
+import { uploadFile, fileUrl } from '@/lib/uploadClient';
 import { generateKopPdf } from '@/lib/pdf';
 import Link from 'next/link';
 import { badgeStatusUjian, labelStatusUjian, statusUjian } from '@/lib/jadwalUjian';
@@ -23,8 +22,9 @@ export default function GuruPenilaian() {
   const [ujianList, setUjianList] = useState<any[]>([]);
 
   // Tunggal: input nilai per siswa untuk bab yang dipilih
-  const [formInput, setFormInput] = useState<Record<string, { skor_benar: number, skor_presensi: number, umpan_balik: string, umpan_balik_foto_url: string }>>({});
-  const [pendingFoto, setPendingFoto] = useState<Record<string, File | null>>({});
+  const [formInput, setFormInput] = useState<Record<string, { skor_benar: number, skor_presensi: number, umpan_balik: string, umpan_balik_file_url: string }>>({});
+  const [pendingFile, setPendingFile] = useState<Record<string, File | null>>({});
+  const [fileLink, setFileLink] = useState<Record<string, string>>({});
   const [showJawabanModal, setShowJawabanModal] = useState(false);
   const [jawabanList, setJawabanList] = useState<any[]>([]);
   const [jawabanSiswaNama, setJawabanSiswaNama] = useState('');
@@ -121,7 +121,7 @@ export default function GuruPenilaian() {
         skor_benar: n?.skor_benar ?? 0,
         skor_presensi: n?.skor_presensi ?? 0,
         umpan_balik: n?.umpan_balik || '',
-        umpan_balik_foto_url: n?.umpan_balik_foto_url || ''
+        umpan_balik_file_url: n?.umpan_balik_file_url || ''
       };
     });
     setFormInput(formMap);
@@ -183,12 +183,15 @@ export default function GuruPenilaian() {
     try {
       if (tampilan === 'tunggal') {
         for (const s of siswaList) {
-          const input = formInput[s.id] || { skor_benar: 0, skor_presensi: 0, umpan_balik: '', umpan_balik_foto_url: '' };
+          const input = formInput[s.id] || { skor_benar: 0, skor_presensi: 0, umpan_balik: '', umpan_balik_file_url: '' };
           const nAkhir = hitungNilaiAkhir(input.skor_benar, input.skor_presensi);
-          const pendingFile = pendingFoto[s.id];
-          let fotoKey: string | null = input.umpan_balik_foto_url || null;
-          if (pendingFile) {
-            fotoKey = await uploadImage(pendingFile, 'umpan-balik');
+          const pending = pendingFile[s.id];
+          const link = fileLink[s.id];
+          let fileKey: string | null = input.umpan_balik_file_url || null;
+          if (pending) {
+            fileKey = await uploadFile(pending, 'umpan-balik');
+          } else if (link) {
+            fileKey = link;
           }
           const payload = {
             siswa_id: s.id,
@@ -197,7 +200,7 @@ export default function GuruPenilaian() {
             skor_presensi: input.skor_presensi,
             nilai_akhir: nAkhir,
             umpan_balik: input.umpan_balik,
-            umpan_balik_foto_url: fotoKey
+            umpan_balik_file_url: fileKey
           };
           const { data: exist } = await supabase.from('nilai').select('id').eq('siswa_id', s.id).eq('bab_id', filterBab).limit(1);
           if (exist && exist.length > 0) {
@@ -237,7 +240,7 @@ export default function GuruPenilaian() {
       const babNama = babList.find(b => b.id === filterBab)?.judul || '';
       const columns = ['No', 'Nama Siswa', 'Skor Benar', 'Skor Presensi', 'Nilai Akhir', 'Umpan Balik'];
       const rows = siswaList.map((s, i) => {
-        const input = formInput[s.id] || { skor_benar: 0, skor_presensi: 0, umpan_balik: '' };
+        const input = formInput[s.id] || { skor_benar: 0, skor_presensi: 0, umpan_balik: '', umpan_balik_file_url: '' };
         const nAkhir = hitungNilaiAkhir(input.skor_benar, input.skor_presensi);
         return [i + 1, s.nama, String(input.skor_benar ?? 0), String(input.skor_presensi ?? 0), nAkhir.toFixed(2), input.umpan_balik || '-'];
       });
@@ -392,7 +395,7 @@ export default function GuruPenilaian() {
           ) : (
             <div className="d-flex flex-column gap-4">
               {siswaList.map((s, idx) => {
-                const input = formInput[s.id] || { skor_benar: 0, skor_presensi: 0, umpan_balik: '' };
+                const input = formInput[s.id] || { skor_benar: 0, skor_presensi: 0, umpan_balik: '', umpan_balik_file_url: '' };
                 const nAkhir = hitungNilaiAkhir(input.skor_benar, input.skor_presensi);
 
                 return (
@@ -453,8 +456,27 @@ export default function GuruPenilaian() {
                     </div>
 
                     <div className="form-group mt-2 hide-on-print">
-                      <label>Foto Umpan Balik (opsional)</label>
-                      <PhotoUpload value={input.umpan_balik_foto_url || null} onFileChange={(file) => setPendingFoto(prev => ({ ...prev, [s.id]: file }))} label="Foto Umpan Balik" />
+                      <label>File Perbaikan (opsional)</label>
+                      {input.umpan_balik_file_url ? (
+                        <div className="d-flex align-center gap-2 mb-2">
+                          <a href={fileUrl(input.umpan_balik_file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat File Perbaikan</a>
+                          <button type="button" className="btn btn-sm btn-outline" onClick={() => handleInputChange(s.id, 'umpan_balik_file_url', '')}>Hapus</button>
+                        </div>
+                      ) : null}
+                      <input
+                        type="file"
+                        className="form-control"
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                        onChange={e => { const f = e.target.files?.[0] || null; setPendingFile(prev => ({ ...prev, [s.id]: f })); }}
+                      />
+                      <label style={{ fontSize: '13px', display: 'block', marginTop: '8px' }}>atau link Google Drive (file besar)</label>
+                      <input
+                        type="url"
+                        className="form-control"
+                        placeholder="https://drive.google.com/..."
+                        value={fileLink[s.id] || ''}
+                        onChange={e => setFileLink(prev => ({ ...prev, [s.id]: e.target.value }))}
+                      />
                     </div>
                   </div>
                 );
