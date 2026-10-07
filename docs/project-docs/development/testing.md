@@ -4,7 +4,7 @@
 How to verify changes in the Mathematics Learning Application.
 
 ## Important
-There is currently **no unit/component test runner** (no Vitest/Jest/Playwright dependency). Verification relies on static checks, type-checking, and structural review. Adding a test runner is a tooling decision that must be proposed before implementation.
+Dua runner tersedia: **Vitest** untuk logika murni (`src/lib/*.test.ts`) dan **Playwright E2E** untuk alur UI (`e2e/*.spec.ts`). E2E berjalan terhadap Supabase asli (data uji `KELAS-E2E` dibuat/dihapus otomatis oleh global setup/teardown) memakai kredensial di `.env.test.local` + service key di `.env.local`. Butuh **Node 20+** (vitest 4 & supabase-js) dan **Google Chrome** terpasang (`channel: 'chrome'`). Skrip/flaky yang belum tertutup tetap diverifikasi lewat review struktural.
 
 ## Table of Contents
 - Scope
@@ -21,17 +21,19 @@ Quality gates applicable to every code change in this repository.
 - Provide a reproducible verification path.
 
 ## Non Goals
-- Automated unit/integration/E2E tests (until a runner is introduced).
+- Load/performance testing dan visual-regression testing — belum ada.
 
 ## Verification Commands
 Run from the repository root:
 
 ```bash
 npm run lint        # ESLint (eslint-config-next)
+npm test            # Vitest unit tests (src/lib/*.test.ts)
 npm run build       # next build — includes TypeScript type-checking
+npm run test:e2e    # Playwright E2E (e2e/*.spec.ts) — butuh Node 20+ & Chrome; auto-start `npm run dev`
 ```
 
-`npm run build` is the primary gate: it fails on type errors and invalid routes. `npm run lint` catches unused variables, missing deps in hooks, and other static issues.
+`npm run build` adalah gate utama: gagal pada type-error & route tak valid. `npm test` mencakup logika deterministik (rata-rata per-bab & ambang remedial, nilai huruf/deskripsi rapor, ketidakhadiran per semester, concurrency, pencocokan jawaban, status ujian). `npm run test:e2e` menutup alur UI end-to-end (guru/siswa/penilaian/remedial/ujian/rapor) terhadap Supabase asli — lihat `e2e/` untuk prasyarat `.env.test.local`.
 
 ## Structural Review Checklist
 When no executable test covers a change, review against:

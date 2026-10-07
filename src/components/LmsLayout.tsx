@@ -1,9 +1,10 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { fileUrl } from '@/lib/uploadClient';
+import { tampilkanNotifikasi } from '@/lib/notifikasi';
 import GpsGate from './GpsGate';
 
 interface LmsLayoutProps {
@@ -15,7 +16,10 @@ interface LmsLayoutProps {
 
 export default function LmsLayout({ children, role, userName: userNameProp = "Pengguna", pageTitle = "Dashboard" }: LmsLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [izinNotif, setIzinNotif] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('unsupported');
   const pathname = usePathname();
+  const router = useRouter();
   const [displayName, setDisplayName] = useState(userNameProp);
   const [fotoProfil, setFotoProfil] = useState<string | null>(null);
   const [namaSekolah, setNamaSekolah] = useState('EduSchool');
@@ -51,8 +55,14 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
     });
   }, []);
 
-  // Fetch notifikasi (unread badge count) dari DB
+  // Fetch notifikasi + REALTIME: badge & daftar update tanpa reload.
   useEffect(() => {
+    let active = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    // Nama unik per-mount: StrictMode menjalankan effect 2x; nama tetap akan
+    // menabrak channel yang sudah subscribe → error "callbacks after subscribe()".
+    const namaChannel = `notifikasi-user-${Math.random().toString(36).slice(2)}`;
+
     const fetchNotifs = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -67,7 +77,41 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
         setUnreadNotifs(data.filter((n) => !n.is_read).length);
       }
     };
-    fetchNotifs();
+
+    const init = async () => {
+      await fetchNotifs();
+      if (!active) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !active) return;
+      // Dengarkan notifikasi baru milik user ini → tampil langsung, tanpa reload.
+      channel = supabase
+        .channel(namaChannel)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'notifikasi', filter: `user_id=eq.${session.user.id}` },
+          (payload: { eventType?: string; new?: { pesan?: string } }) => {
+            fetchNotifs();
+            // Baris notifikasi BARU → tampilkan OS/toast DI HALAMAN MANA PUN (semua role).
+            if (payload.eventType === 'INSERT') {
+              tampilkanNotifikasi(payload.new?.pesan || 'Notifikasi baru');
+            }
+          }
+        )
+        .subscribe();
+      // Cleanup keburu jalan sebelum channel ter-set → lepas segera.
+      if (!active) supabase.removeChannel(channel);
+    };
+    init();
+
+    return () => {
+      active = false;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Izin notifikasi browser (semua role) — agar notif OS muncul, bukan cuma badge.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) setIzinNotif(Notification.permission);
   }, []);
 
   const toggleSidebar = (state?: boolean) => {
@@ -115,6 +159,15 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
     }
   };
 
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    // Hapus sesi Supabase (cookie) agar benar-benar keluar dari sesi aktif —
+    // sebelumnya tombol ini hanya bernavigasi ke /login tanpa signOut().
+    await supabase.auth.signOut();
+    router.replace('/login');
+  };
+
   const getNavLinks = () => {
     if (role === 'admin') {
       return [
@@ -123,6 +176,7 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
         { name: 'Master Kelas', href: '/admin/kelas', icon: '🏫' },
         { name: 'Management Jadwal', href: '/admin/jadwal', icon: '📅' },
         { name: 'Master Grid Jadwal', href: '/admin/slot-jadwal', icon: '⏰' },
+        { name: 'Pengumuman', href: '/admin/pengumuman', icon: '📢' },
         { name: 'Helpdesk / Laporan', href: '/admin/laporan', icon: '🎧' },
         { name: 'Profil Saya', href: '/admin/profile', icon: '👤' },
         { name: 'Pengaturan', href: '/admin/pengaturan', icon: '⚙️' },
@@ -134,6 +188,8 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
         { name: 'Ujian', href: '/guru/ujian', icon: '📝' },
         { name: 'Presensi', href: '/guru/presensi', icon: '📋' },
         { name: 'Penilaian', href: '/guru/penilaian', icon: '✍️' },
+        { name: 'Rapor', href: '/guru/rapor', icon: '📄' },
+        { name: 'Pengumuman', href: '/guru/pengumuman', icon: '📢' },
         { name: 'Helpdesk', href: '/guru/helpdesk', icon: '🎧' },
         { name: 'Profil Saya', href: '/guru/profile', icon: '👤' },
       ];
@@ -194,14 +250,20 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
         </nav>
 
         <div className="sidebar-footer">
-          <Link href="/login" className="btn-logout">
+          <button
+            type="button"
+            className="btn-logout"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', width: '100%', font: 'inherit', color: 'inherit', textAlign: 'left' }}
+          >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
               <polyline points="16 17 21 12 16 7"/>
               <line x1="21" y1="12" x2="9" y2="12"/>
             </svg>
-            <span>Keluar Sesi</span>
-          </Link>
+            <span>{loggingOut ? 'Keluar...' : 'Keluar Sesi'}</span>
+          </button>
         </div>
       </aside>
 
@@ -296,6 +358,28 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
           {children}
         </main>
       </div>
+
+      {/* Banner izin notifikasi (muncul bila belum diputuskan) */}
+      {izinNotif === 'default' && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '24px', zIndex: 1000, background: '#fff',
+          padding: '12px 16px', borderRadius: '10px', boxShadow: '0 4px 14px rgba(0,0,0,0.15)',
+          display: 'flex', gap: '10px', alignItems: 'center', maxWidth: '340px',
+        }}>
+          <span style={{ fontSize: '13px' }}>Aktifkan notifikasi browser untuk info tugas, ujian, &amp; pengumuman.</span>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={async () => {
+              const p = await Notification.requestPermission();
+              setIzinNotif(p);
+              if (p === 'granted') tampilkanNotifikasi('Notifikasi browser aktif. Kamu akan menerima info di sini.', 'Berhasil');
+            }}
+          >
+            Aktifkan
+          </button>
+        </div>
+      )}
 
       {/* Floating Helpdesk (call-center) — siswa & guru */}
       {role !== 'admin' && (

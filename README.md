@@ -10,7 +10,7 @@ Aplikasi LMS berbasis web untuk pembelajaran matematika SMP dengan fitur multi-r
 |---|---|
 | Framework | Next.js 16 (App Router) |
 | Database | Supabase (PostgreSQL + Realtime) |
-| AI Grading | Google Gemini API |
+| AI Grading | Groq (`openai/gpt-oss-120b`) — bisa dialihkan ke Google Gemini via `AI_PROVIDER` |
 | Styling | Vanilla CSS |
 | Deployment | Vercel |
 
@@ -23,7 +23,7 @@ Pastikan sudah terinstall sebelum mulai:
 1. **Node.js v18+** — Download di https://nodejs.org (pilih versi LTS). Verifikasi: buka Command Prompt, ketik node -v
 2. **Git** — Download di https://git-scm.com/download/win. Verifikasi: git --version
 3. **Akun Supabase** — Daftar gratis di https://supabase.com
-4. **Akun Google AI Studio** — Untuk Gemini API Key di https://aistudio.google.com
+4. **Akun Groq** — Untuk Groq API Key (gratis) di https://console.groq.com/keys. *(Opsional: akun Google AI Studio bila ingin memakai Gemini.)*
 
 ---
 
@@ -95,8 +95,15 @@ Isi dengan:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
-GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+
+# Koreksi esai otomatis (AI). AI_PROVIDER: groq (default) | gemini
+AI_PROVIDER=groq
+GROQ_API_KEY=YOUR_GROQ_API_KEY_HERE
+GROQ_MODEL=openai/gpt-oss-120b
+# GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE   # hanya bila AI_PROVIDER=gemini
 ```
+
+Catatan: soal **pilihan ganda tidak memakai AI** (dinilai otomatis di kode). AI hanya membantu menilai **esai/uraian**; guru tetap wajib memvalidasi.
 
 Tips Windows: Jika ekstensi file tidak terlihat, buka File Explorer → View → centang File name extensions
 
@@ -160,7 +167,7 @@ Agar fitur notifikasi realtime berfungsi:
 1. Push kode ke GitHub
 2. Login ke https://vercel.com dan klik Add New Project
 3. Import repository dari GitHub
-4. Di bagian Environment Variables, tambahkan ketiga variabel dari .env.local
+4. Di bagian Environment Variables, tambahkan semua variabel dari .env.local (Supabase + kunci AI)
 5. Klik Deploy
 
 ---
@@ -170,7 +177,7 @@ Agar fitur notifikasi realtime berfungsi:
 | Error | Solusi |
 |---|---|
 | command not found: npm | Install Node.js dari nodejs.org |
-| Error: invalid API key | Periksa kembali GEMINI_API_KEY di .env.local |
+| Error: invalid API key | Periksa kunci AI di .env.local — `GROQ_API_KEY` (atau `GEMINI_API_KEY` bila `AI_PROVIDER=gemini`) |
 | Data tidak muncul | Pastikan seed_data.sql sudah dijalankan di Supabase |
 | Realtime tidak berjalan | Jalankan SQL aktifkan realtime di langkah 3c |
 | Build gagal di Vercel | Pastikan semua environment variables sudah diisi di Vercel dashboard |

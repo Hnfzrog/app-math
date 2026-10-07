@@ -1,44 +1,67 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { NextResponse, type NextRequest } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabase-server';
+
+// Rute terproteksi + role yang diizinkan (admin boleh masuk semua area).
+const RULES: { prefix: string; allow: string[] }[] = [
+  { prefix: '/admin', allow: ['admin'] },
+  { prefix: '/guru', allow: ['guru', 'admin'] },
+  { prefix: '/siswa', allow: ['siswa', 'admin'] },
+];
+
+const HOME_BY_ROLE: Record<string, string> = {
+  admin: '/admin/dashboard',
+  guru: '/guru/dashboard',
+  siswa: '/siswa/dashboard',
+};
+
+// Prefetch dari <Link> tidak boleh memicu pengalihan yang tidak disengaja.
+function isPrefetchRequest(req: NextRequest): boolean {
+  return (
+    req.headers.get('next-router-prefetch') === '1' ||
+    req.headers.get('x-middleware-prefetch') === '1' ||
+    req.headers.get('purpose') === 'prefetch'
+  );
+}
 
 export async function proxy(req: NextRequest) {
-  const res = NextResponse.next()
-  
-  // Create a supabase client from edge environment variables
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  const pathname = req.nextUrl.pathname;
 
-  // Get session from cookies if using SSR auth (supabase-js normally doesn't handle cookies in middleware natively without @supabase/ssr package)
-  // For this MVP, we are protecting routes simply by checking for a generic cookie or leaving it to client-side for simplicity if we don't have @supabase/ssr installed.
-  // Actually, to do proper route protection with Supabase in Next.js App Router we should use @supabase/ssr.
-  // We'll put a placeholder here that allows all for now, until we set up `@supabase/ssr`.
-  
-  const pathname = req.nextUrl.pathname
-  
-  // Basic route restriction logic based on a cookie 'user-role' for MVP purposes
-  const roleCookie = req.cookies.get('user-role')?.value
+  const rule = RULES.find((r) => pathname.startsWith(r.prefix));
+  // Rute di luar area terproteksi: lewat saja.
+  if (!rule) return NextResponse.next();
 
-  // Protect admin routes
-  if (pathname.startsWith('/admin') && roleCookie !== 'admin') {
-    return NextResponse.redirect(new URL('/login', req.url))
-  }
-  
-  // Protect guru routes
-  if (pathname.startsWith('/guru') && roleCookie !== 'guru' && roleCookie !== 'admin') {
-    return NextResponse.redirect(new URL('/login', req.url))
-  }
-  
-  // Protect siswa routes
-  if (pathname.startsWith('/siswa') && roleCookie !== 'siswa' && roleCookie !== 'admin') {
-    return NextResponse.redirect(new URL('/login', req.url))
+  const { supabase, getResponse } = createSupabaseServerClient(req);
+
+  // Optimistic check: baca sesi dari COOKIE (getSession), TANPA refresh jaringan.
+  // Sebelumnya getUser() memaksa refresh token pada SETIAP navigasi; digabung dengan
+  // refresh oleh klien browser → token yang sama dipakai dua kali → Supabase
+  // "reuse detection" me-revoke sesi (penyebab logout mendadak). getSession() tidak
+  // menyentuh jaringan sehingga tidak memicu refresh/race.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
+
+  // Tanpa sesi → satu-satunya alasan mengalihkan ke /login.
+  if (!user) {
+    if (isPrefetchRequest(req)) return getResponse();
+    console.warn(`[auth] redirect /login — ${pathname} (tanpa sesi)`);
+    return NextResponse.redirect(new URL('/login', req.url));
   }
 
-  return res
+  // Sesi ada tapi role tidak berhak → kembalikan ke dashboard miliknya (bukan /login,
+  // agar pengguna tidak dipaksa login ulang padahal sesinya masih aktif).
+  const role = (user.app_metadata?.role as string) || (user.user_metadata?.role as string) || '';
+  if (role && !rule.allow.includes(role)) {
+    if (isPrefetchRequest(req)) return getResponse();
+    const home = HOME_BY_ROLE[role] || '/login';
+    console.warn(`[auth] redirect ${home} — ${pathname} (role=${role} tidak berhak)`);
+    return NextResponse.redirect(new URL(home, req.url));
+  }
+
+  return getResponse();
 }
 
 export const config = {
   matcher: ['/admin/:path*', '/guru/:path*', '/siswa/:path*'],
-}
+};

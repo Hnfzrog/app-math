@@ -338,7 +338,12 @@
           <pre><code>NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-GEMINI_API_KEY=...</code></pre>
+
+# Koreksi esai otomatis (AI). AI_PROVIDER: groq (default) | gemini
+AI_PROVIDER=groq
+GROQ_API_KEY=...
+GROQ_MODEL=openai/gpt-oss-120b</code></pre>
+          <div class="callout info"><span class="ico">🔑</span><span><strong>GROQ_API_KEY</strong> gratis: daftar di <em>console.groq.com</em>, lalu buat key di <em>console.groq.com/keys</em>. Hanya soal <strong>esai</strong> yang dinilai AI; soal pilihan ganda dinilai otomatis tanpa AI.</span></div>
           <div class="callout warn"><span class="ico">⚠️</span><span>Simpan dengan nama <code>.env.local</code> — bukan <code>.env.local.txt</code>. Di Windows, aktifkan dulu <em>View → File name extensions</em> agar terlihat.</span></div>
           <div class="callout tip"><span class="ico">🔒</span><span>File ini berisi kunci rahasia. Jangan dibagikan ke siapa pun dan jangan diunggah ke internet.</span></div>
         </div>
@@ -409,7 +414,7 @@ npm run dev</code></pre>
           </tr>
           <tr>
             <td>Koreksi jawaban otomatis error</td>
-            <td>Kunci AI salah atau kosong. Periksa baris <code>GEMINI_API_KEY</code> di file <code>.env.local</code>, lalu jalankan ulang aplikasi.</td>
+            <td>Kunci AI salah atau kosong. Periksa kunci di file <code>.env.local</code> — <code>GROQ_API_KEY</code> (atau <code>GEMINI_API_KEY</code> bila <code>AI_PROVIDER=gemini</code>), lalu jalankan ulang aplikasi.</td>
           </tr>
           <tr>
             <td>Muncul peringatan "GPS Belum Diaktifkan" terus-menerus</td>

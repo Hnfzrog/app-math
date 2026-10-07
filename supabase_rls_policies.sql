@@ -336,3 +336,113 @@ DROP POLICY IF EXISTS "hari read" ON public.hari;
 CREATE POLICY "hari read" ON public.hari FOR SELECT TO authenticated USING (true);
 DROP POLICY IF EXISTS "admin full hari" ON public.hari;
 CREATE POLICY "admin full hari" ON public.hari FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+
+-- ==========================================
+-- REMEDIAL_TARGET (revisi 6 Okt 2026)
+-- ==========================================
+DROP POLICY IF EXISTS "remedial_target read" ON public.remedial_target;
+CREATE POLICY "remedial_target read" ON public.remedial_target FOR SELECT TO authenticated
+  USING (siswa_id = auth.uid() OR is_admin() OR is_guru());
+DROP POLICY IF EXISTS "admin full remedial_target" ON public.remedial_target;
+CREATE POLICY "admin full remedial_target" ON public.remedial_target FOR ALL TO authenticated
+  USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru manage remedial_target" ON public.remedial_target;
+CREATE POLICY "guru manage remedial_target" ON public.remedial_target FOR ALL TO authenticated
+  USING (is_guru()) WITH CHECK (is_guru());
+
+-- ==========================================
+-- PENGUMUMAN (revisi 6 Okt 2026)
+-- ==========================================
+DROP POLICY IF EXISTS "pengumuman read" ON public.pengumuman;
+CREATE POLICY "pengumuman read" ON public.pengumuman FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "admin full pengumuman" ON public.pengumuman;
+CREATE POLICY "admin full pengumuman" ON public.pengumuman FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru insert pengumuman" ON public.pengumuman;
+CREATE POLICY "guru insert pengumuman" ON public.pengumuman FOR INSERT TO authenticated
+  WITH CHECK (author_id = auth.uid() AND is_guru());
+DROP POLICY IF EXISTS "guru delete own pengumuman" ON public.pengumuman;
+CREATE POLICY "guru delete own pengumuman" ON public.pengumuman FOR DELETE TO authenticated
+  USING (author_id = auth.uid() AND is_guru());
+
+-- ==========================================
+-- NILAI_ITEM (per-item grading, Opsi B)
+-- ==========================================
+DROP POLICY IF EXISTS "nilai_item read own" ON public.nilai_item;
+CREATE POLICY "nilai_item read own" ON public.nilai_item FOR SELECT TO authenticated USING (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "admin full nilai_item" ON public.nilai_item;
+CREATE POLICY "admin full nilai_item" ON public.nilai_item FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru manage nilai_item" ON public.nilai_item;
+CREATE POLICY "guru manage nilai_item" ON public.nilai_item FOR ALL TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = (
+      CASE WHEN nilai_item.item_type = 'konten'
+        THEN (SELECT b.kelas_id FROM public.konten k JOIN public.bab b ON b.id = k.bab_id WHERE k.id = nilai_item.item_id)
+        ELSE (SELECT u.kelas_id FROM public.ujian u WHERE u.id = nilai_item.item_id) END)
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = (
+      CASE WHEN nilai_item.item_type = 'konten'
+        THEN (SELECT b.kelas_id FROM public.konten k JOIN public.bab b ON b.id = k.bab_id WHERE k.id = nilai_item.item_id)
+        ELSE (SELECT u.kelas_id FROM public.ujian u WHERE u.id = nilai_item.item_id) END)
+  ));
+
+DROP POLICY IF EXISTS "pengumuman_target read" ON public.pengumuman_target;
+CREATE POLICY "pengumuman_target read" ON public.pengumuman_target FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "admin full pengumuman_target" ON public.pengumuman_target;
+CREATE POLICY "admin full pengumuman_target" ON public.pengumuman_target FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru manage pengumuman_target" ON public.pengumuman_target;
+CREATE POLICY "guru manage pengumuman_target" ON public.pengumuman_target FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.pengumuman p WHERE p.id = pengumuman_target.pengumuman_id AND p.author_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.pengumuman p WHERE p.id = pengumuman_target.pengumuman_id AND p.author_id = auth.uid()));
+
+-- ==========================================
+-- PELANGGARAN_UJIAN (revisi 6 Okt 2026)
+-- ==========================================
+DROP POLICY IF EXISTS "siswa insert own pelanggaran" ON public.pelanggaran_ujian;
+CREATE POLICY "siswa insert own pelanggaran" ON public.pelanggaran_ujian FOR INSERT TO authenticated WITH CHECK (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "siswa read own pelanggaran" ON public.pelanggaran_ujian;
+CREATE POLICY "siswa read own pelanggaran" ON public.pelanggaran_ujian FOR SELECT TO authenticated USING (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "admin full pelanggaran" ON public.pelanggaran_ujian;
+CREATE POLICY "admin full pelanggaran" ON public.pelanggaran_ujian FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru read pelanggaran kelasnya" ON public.pelanggaran_ujian;
+CREATE POLICY "guru read pelanggaran kelasnya" ON public.pelanggaran_ujian FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.ujian uj JOIN public.guru_kelas gk ON gk.kelas_id = uj.kelas_id
+    WHERE uj.id = pelanggaran_ujian.ujian_id AND gk.guru_id = auth.uid()
+  ));
+
+-- ==========================================
+-- RAPOR (cetak & perangkingan) — 7 Okt 2026
+-- ==========================================
+DROP POLICY IF EXISTS "rapor read" ON public.rapor;
+CREATE POLICY "rapor read" ON public.rapor FOR SELECT TO authenticated
+  USING (
+    is_admin()
+    OR is_guru_kelas(rapor.kelas_id)
+    OR (rapor.is_terbit AND EXISTS (
+      SELECT 1 FROM public.siswa_kelas sk
+      WHERE sk.kelas_id = rapor.kelas_id AND sk.siswa_id = auth.uid()
+    ))
+  );
+DROP POLICY IF EXISTS "admin full rapor" ON public.rapor;
+CREATE POLICY "admin full rapor" ON public.rapor FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru manage rapor" ON public.rapor;
+CREATE POLICY "guru manage rapor" ON public.rapor FOR ALL TO authenticated
+  USING (is_guru_kelas(rapor.kelas_id)) WITH CHECK (is_guru_kelas(rapor.kelas_id));
+
+DROP POLICY IF EXISTS "rapor_siswa read" ON public.rapor_siswa;
+CREATE POLICY "rapor_siswa read" ON public.rapor_siswa FOR SELECT TO authenticated
+  USING (
+    is_admin()
+    OR EXISTS (SELECT 1 FROM public.rapor r WHERE r.id = rapor_siswa.rapor_id AND is_guru_kelas(r.kelas_id))
+    OR (
+      rapor_siswa.siswa_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.rapor r WHERE r.id = rapor_siswa.rapor_id AND r.is_terbit)
+    )
+  );
+DROP POLICY IF EXISTS "admin full rapor_siswa" ON public.rapor_siswa;
+CREATE POLICY "admin full rapor_siswa" ON public.rapor_siswa FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+DROP POLICY IF EXISTS "guru manage rapor_siswa" ON public.rapor_siswa;
+CREATE POLICY "guru manage rapor_siswa" ON public.rapor_siswa FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.rapor r WHERE r.id = rapor_siswa.rapor_id AND is_guru_kelas(r.kelas_id)))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.rapor r WHERE r.id = rapor_siswa.rapor_id AND is_guru_kelas(r.kelas_id)));

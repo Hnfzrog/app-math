@@ -127,7 +127,8 @@ sekelas saat ujian menjadi terbit (menggantikan `trg_notif_ujian_baru` yang mene
   - **Tabel terpisah dengan sengaja**: policy baca `soal_ujian` terbuka untuk guru (dipakai fitur "Ambil Soal dari Ujian Lain"), jadi kunci tidak boleh ikut terbaca. Siswa tidak punya policy sama sekali; guru hanya untuk ujian kelasnya.
   - Penilaian karena itu dijalankan server-side lewat `POST /api/ujian/submit` (kunci tidak pernah sampai ke browser).
 - `jawaban_ujian`: `id`, `soal_id`, `siswa_id`, `jawaban_teks` (pg: teks opsi, multi-jawaban: JSON array), `foto_url`, `skor_ai`, `feedback_ai`, `skor_final`, `dinilai_at`, `status` (text, check in ('pending_verifikasi','final')), `created_at`
-  - Alur: pg dinilai otomatis 0/100 saat submit; uraian dibantu Gemini; guru mengedit `skor_final` lalu memvalidasi (`status='final'`) lewat `/guru/ujian/[id]/hasil`.
+  - Alur: pg dinilai otomatis 0/100 saat submit; uraian dibantu AI (provider swappable via env `AI_PROVIDER` — default **Groq** `llama-3.3-70b-versatile`, alternatif Gemini; lihat `src/lib/aiScore.ts`); guru mengedit `skor_final` lalu memvalidasi (`status='final'`) lewat `/guru/ujian/[id]/hasil`.
+  - Bila panggilan AI gagal (key kosong/limit), `/api/ujian/submit` **tidak** gagal: `skor_ai` dibiarkan `null` dan guru menilai esai secara manual.
   - Trigger `trg_notif_ujian_divalidasi` mengirim notifikasi ke siswa saat status berubah menjadi `final`.
 
 ### 8. `nilai` Table Modifications
@@ -192,3 +193,101 @@ Siswa membaca miliknya di halaman hasil ujian. Tidak ada insert policy untuk sis
 - `supabase_schema.sql` is the single canonical schema; `supabase_v2_migration.sql` is its incremental equivalent; `supabase_complete_setup.sql` and `reset_and_seed.sql` are legacy/alternative.
 - RLS is strictly enforced: no `USING (true)` policies in the canonical schema. `disable_rls_for_demo.sql` is development-only and must never be applied to production.
 - `status_validasi` must carry `CHECK (status_validasi IN ('pending','valid','invalid'))` in every schema file.
+
+### 14. `pengumuman` Table (New)
+Pengumuman admin/guru.
+- `id` (uuid, pk)
+- `author_id` (uuid, fk users)
+- `author_role` (text, check in ('admin','guru'))
+- `judul` (text)
+- `deskripsi` (text)
+- `tayang_sampai` (timestamptz) — batas waktu tayang; setelah ini pengumuman hilang
+- `created_at` (timestamptz)
+
+### 15. `pengumuman_target` Table (New) — audiens
+- `id` (uuid, pk)
+- `pengumuman_id` (uuid, fk pengumuman, `ON DELETE CASCADE`)
+- `role` (text, nullable) — 'guru' | 'siswa'
+- `kelas_id` (uuid, nullable, fk kelas)
+- `user_id` (uuid, nullable, fk users)
+
+Satu pengumuman bisa punya banyak baris target. Admin: role / user tertentu / semua. Guru: kelas / user tertentu / semua kelas.
+
+### 16. `pelanggaran_ujian` Table (New)
+Catatan pelanggaran mode ujian.
+- `id` (uuid, pk)
+- `ujian_id` (uuid, fk ujian, `ON DELETE CASCADE`)
+- `siswa_id` (uuid, fk users)
+- `jenis` (text, check in ('pindah_tab','keluar_halaman','keluar_fullscreen'))
+- `durasi_detik` (integer) — lama di luar halaman
+- `created_at` (timestamptz)
+
+### 17. `nilai` Modifications — komponen penilaian per bab
+Tambah kolom komponen ke `public.nilai` (tetap satu baris per siswa+bab, `UNIQUE (siswa_id, bab_id)`):
+- `nilai_lkpd` (numeric)
+- `nilai_tugas` (numeric)
+- `nilai_uh` (numeric)
+- `nilai_keaktifan` (numeric)
+
+`nilai_akhir` (sudah ada) = **rata-rata SEDERHANA komponen yang terisi**, dihitung trigger `set_nilai_akhir` (NULL bila tidak ada komponen). Nilai LKPD/Tugas/UH murni pekerjaan siswa; keaktifan otomatis dari presensi + bisa diedit. Kolom lama `skor_benar`/`skor_presensi` tidak lagi dipakai (dibiarkan untuk kompatibilitas). `nilai_uh` diisi otomatis saat siswa submit UH.
+
+### 18. `nilai_komponen`
+Tidak dipakai — desain final memakai kolom komponen pada `nilai` (lihat #17), agar minimal dan kompatibel dengan pembaca `nilai_akhir` yang sudah ada (dashboard guru/siswa, e-Rapor).
+
+### 19. `ujian` & `konten` — Pembahasan + Remedial
+- `ujian`: +`pembahasan_file_url` (text), +`pembahasan_terbit_at` (timestamptz, nullable), +`pembahasan_is_terbit` (boolean default false), +`is_remedial` (boolean default false)
+- `konten`: +`pembahasan_file_url`, +`pembahasan_terbit_at`, +`pembahasan_is_terbit`, +`is_remedial`
+
+Pembahasan terbit otomatis saat semua siswa (yang ambil) selesai + 1 menit, atau pada `pembahasan_terbit_at`, atau override manual (guru).
+
+**Mekanisme terbit:** trigger `trg_auto_terbit_pembahasan` (AFTER INSERT `jawaban_ujian`) mengisi `ujian.pembahasan_terbit_at = now() + 1 menit` begitu **semua siswa kelas** sudah mengumpulkan ujian tsb dan `pembahasan_file_url` terisi. Guru dapat menetapkan `pembahasan_terbit_at` (jadwal) atau `pembahasan_is_terbit = true` (terbit sekarang). Siswa melihat pembahasan bila `pembahasan_is_terbit` **atau** (`pembahasan_terbit_at` ≤ sekarang) dan file ada. Untuk tugas (konten) tidak ada auto-terbit — guru menyalakan `pembahasan_is_terbit`/jadwal.
+
+### 20. `remedial_target` Table (New) — daftar siswa eksplisit
+- `id` (uuid, pk)
+- `item_type` (text, check in ('konten','ujian'))
+- `item_id` (uuid)
+- `siswa_id` (uuid, fk users, `ON DELETE CASCADE`)
+- `created_at` (timestamptz)
+
+Tugas/UH remedial (`is_remedial = true`) hanya terlihat/dikerjakan oleh siswa yang tercantum di `remedial_target`.
+
+### 21. `nilai_item` Table (New) — penilaian PER ITEM (Opsi B, 7 Okt 2026)
+- `id` (uuid, pk)
+- `siswa_id` (uuid, fk users, `ON DELETE CASCADE`)
+- `item_type` (text, check in ('konten','ujian'))
+- `item_id` (uuid) — referensi `konten.id` (LKPD/tugas) atau `ujian.id` (UH)
+- `skor` (numeric, 0–100) — skor item; NULL = belum dinilai
+- `dinilai_at` (timestamptz)
+- `UNIQUE (siswa_id, item_type, item_id)` — satu skor per siswa per item
+
+**Model penilaian final:** tiap tugas/LKPD/UH dinilai **per item**. Kolom komponen pada `nilai` (`nilai_lkpd`/`nilai_tugas`/`nilai_uh`) = **rata-rata `skor` item** di bab tsb, dihitung trigger `recompute_nilai_komponen` (AFTER INSERT/UPDATE/DELETE pada `nilai_item`) → lalu `nilai_akhir` (rata-rata komponen terisi) ikut terhitung. `/api/ujian/submit` (UH) menulis `nilai_item` (item_type='ujian'), bukan `nilai` langsung. **UTS/UAS tidak per-bab** — dinilai terpisah di halaman hasil ujian (E3).
+
+### 22. `bab` — kolom semester
+- +`semester` (text, check in ('ganjil','genap'), default 'ganjil') — menandai semester tiap bab; nilai mewarisi semester lewat bab.
+
+### 23. `rapor` Table (New) — status terbit per kelas + semester
+- `id` (uuid, pk)
+- `kelas_id` (uuid, fk kelas, `ON DELETE CASCADE`)
+- `semester` (text, check in ('ganjil','genap'))
+- `tahun_ajaran` (text)
+- `is_terbit` (boolean, NOT NULL, default false)
+- `terbit_at` (timestamptz)
+- `created_at` (timestamptz)
+- `UNIQUE (kelas_id, semester)` — satu rapor per kelas per semester
+
+### 24. `rapor_siswa` Table (New) — deskripsi manual per siswa
+- `id` (uuid, pk)
+- `rapor_id` (uuid, fk rapor, `ON DELETE CASCADE`)
+- `siswa_id` (uuid, fk users, `ON DELETE CASCADE`)
+- `kegiatan_pengembangan` (jsonb) — `[{kegiatan, deskripsi}]`
+- `akhlak_kepribadian` (jsonb) — `[{deskripsi}]`
+- `catatan_wali_kelas` (text)
+- `created_at`, `updated_at` (timestamptz)
+- `UNIQUE (rapor_id, siswa_id)`
+
+### 25. `pengaturan` — kolom kkm
+- +`kkm` (numeric, default 75) — ambang ketuntasan untuk kolom KKM rapor.
+
+RLS `rapor` + `rapor_siswa`: guru wali kelas (via `guru_kelas`) read/write; siswa read hanya baris miliknya saat `rapor.is_terbit = true`.
+
+**Trigger `trg_notif_rapor_terbit`** — saat `rapor.is_terbit` berubah menjadi `true`, kirim notifikasi "Rapor semester … sudah diterbitkan" ke semua siswa sekelas (SECURITY DEFINER, menulis ke `notifikasi`).

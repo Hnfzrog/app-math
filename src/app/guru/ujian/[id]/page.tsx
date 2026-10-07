@@ -3,7 +3,7 @@ import { useState, use, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import PhotoUpload from '@/components/PhotoUpload';
-import { uploadFile } from '@/lib/uploadClient';
+import { uploadFile, fileUrl } from '@/lib/uploadClient';
 import Link from 'next/link';
 
 export default function GuruUjianDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -38,6 +38,12 @@ export default function GuruUjianDetail({ params }: { params: Promise<{ id: stri
   const [soalDipilih, setSoalDipilih] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
 
+  // Pembahasan ujian (D3)
+  const [pembahasanFile, setPembahasanFile] = useState<File | null>(null);
+  const [pembahasanTerbit, setPembahasanTerbit] = useState(false);
+  const [pembahasanJadwal, setPembahasanJadwal] = useState('');
+  const [savingPembahasan, setSavingPembahasan] = useState(false);
+
   useEffect(() => {
     fetchData();
   }, [ujianId]);
@@ -48,12 +54,14 @@ export default function GuruUjianDetail({ params }: { params: Promise<{ id: stri
     // Fetch info ujian
     const { data: dataUjian } = await supabase
       .from('ujian')
-      .select('id, jenis, deskripsi, durasi_menit, kelas(nama)')
+      .select('id, jenis, deskripsi, durasi_menit, pembahasan_file_url, pembahasan_terbit_at, pembahasan_is_terbit, kelas(nama)')
       .eq('id', ujianId)
       .single();
 
     if (dataUjian) {
       setUjian(dataUjian);
+      setPembahasanTerbit(!!dataUjian.pembahasan_is_terbit);
+      setPembahasanJadwal(dataUjian.pembahasan_terbit_at ? String(dataUjian.pembahasan_terbit_at).slice(0, 16) : '');
     }
 
     // Fetch daftar soal
@@ -338,6 +346,28 @@ export default function GuruUjianDetail({ params }: { params: Promise<{ id: stri
     setImporting(false);
   };
 
+  const simpanPembahasan = async () => {
+    if (!ujian) return;
+    setSavingPembahasan(true);
+    try {
+      let fileKey: string | null = ujian.pembahasan_file_url || null;
+      if (pembahasanFile) fileKey = await uploadFile(pembahasanFile, 'pembahasan');
+      const { error } = await supabase.from('ujian').update({
+        pembahasan_file_url: fileKey,
+        pembahasan_is_terbit: pembahasanTerbit,
+        pembahasan_terbit_at: pembahasanJadwal ? new Date(pembahasanJadwal).toISOString() : (ujian.pembahasan_terbit_at || null),
+      }).eq('id', ujianId);
+      if (error) throw error;
+      customAlert('Pembahasan tersimpan.', false);
+      setPembahasanFile(null);
+      fetchData();
+    } catch (e) {
+      customAlert('Gagal menyimpan pembahasan: ' + (e instanceof Error ? e.message : String(e)), true);
+    } finally {
+      setSavingPembahasan(false);
+    }
+  };
+
   if (loading) return <div className="p-4 text-center">Loading...</div>;
 
   return (
@@ -361,6 +391,50 @@ export default function GuruUjianDetail({ params }: { params: Promise<{ id: stri
           <p className="mb-1"><strong>Jenis:</strong> {ujian.jenis}</p>
           <p className="mb-1"><strong>Deskripsi:</strong> {ujian.deskripsi}</p>
           <p className="mb-0"><strong>Durasi:</strong> {ujian.durasi_menit} Menit</p>
+        </div>
+      )}
+
+      {ujian && (
+        <div className="card card-body mb-4">
+          <h4 className="mb-2">Pembahasan Ujian</h4>
+          <p className="text-muted" style={{ fontSize: '13px' }}>
+            Terbit otomatis 1 menit setelah semua siswa mengumpulkan (bila file diisi), atau pada waktu yang ditentukan, atau terbitkan sekarang.
+          </p>
+          {ujian.pembahasan_file_url ? (
+            <div className="mb-2">
+              <a href={fileUrl(ujian.pembahasan_file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat Pembahasan Terunggah</a>
+              <div className="text-sm text-muted">
+                Status: {ujian.pembahasan_is_terbit
+                  ? 'Terbit'
+                  : ujian.pembahasan_terbit_at
+                    ? `Terbit otomatis/dijadwalkan ${new Date(ujian.pembahasan_terbit_at).toLocaleString('id-ID')}`
+                    : 'Belum terbit'}
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted">Belum ada file pembahasan.</p>
+          )}
+          <div className="form-group">
+            <label>Upload File Pembahasan (pdf/doc/gambar, maks 2MB)</label>
+            <input type="file" className="form-control" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={(e) => setPembahasanFile(e.target.files?.[0] || null)} />
+          </div>
+          <div className="grid-2">
+            <div className="form-group mb-0">
+              <label>Jadwalkan Terbit (opsional)</label>
+              <input type="datetime-local" className="form-control" value={pembahasanJadwal} onChange={(e) => setPembahasanJadwal(e.target.value)} />
+            </div>
+            <div className="form-group mb-0">
+              <label className="d-flex align-center gap-2" style={{ cursor: 'pointer', marginTop: '1.5rem' }}>
+                <input type="checkbox" checked={pembahasanTerbit} onChange={(e) => setPembahasanTerbit(e.target.checked)} style={{ transform: 'scale(1.2)' }} />
+                <span>Terbitkan sekarang</span>
+              </label>
+            </div>
+          </div>
+          <div className="text-right mt-2">
+            <button className="btn btn-primary" onClick={simpanPembahasan} disabled={savingPembahasan}>
+              {savingPembahasan ? 'Menyimpan...' : 'Simpan Pembahasan'}
+            </button>
+          </div>
         </div>
       )}
 

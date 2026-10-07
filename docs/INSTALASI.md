@@ -86,8 +86,16 @@ Di dalam folder aplikasi, buat file baru bernama `.env.local` (pakai Notepad), l
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-GEMINI_API_KEY=...
+
+# Koreksi esai otomatis (AI). AI_PROVIDER: groq (default) | gemini
+AI_PROVIDER=groq
+GROQ_API_KEY=...
+GROQ_MODEL=openai/gpt-oss-120b
 ```
+
+> 🔑 **GROQ_API_KEY** gratis: daftar di https://console.groq.com lalu buat key di https://console.groq.com/keys. *(Alternatif: set `AI_PROVIDER=gemini` dan isi `GEMINI_API_KEY` dari https://aistudio.google.com.)*
+
+> ℹ️ Hanya soal **esai/uraian** yang dinilai AI. Soal **pilihan ganda** dinilai otomatis tanpa AI, dan guru tetap memvalidasi nilai esai.
 
 > ⚠️ Simpan dengan nama `.env.local` — bukan `.env.local.txt`. Di Windows, aktifkan dulu **View → File name extensions** agar ekstensinya terlihat.
 
@@ -148,7 +156,7 @@ Setelah selesai, Anda akan mendapat alamat website (misalnya `appmath.vercel.app
 | "relation does not exist" / data tidak muncul | Database belum siap. Jalankan ulang file SQL dari Langkah 4 sampai selesai tanpa error. |
 | "new row violates row-level security policy" | Bagian aturan akses (RLS) di file SQL belum ikut jalan. Pastikan **seluruh isi** file SQL dijalankan, bukan sebagian. |
 | Upload foto gagal / foto tidak tampil | Bucket belum benar. Cek Langkah 5 — nama harus `foto` dan statusnya **Public**. |
-| Koreksi jawaban otomatis error | Kunci AI salah/kosong. Periksa `GEMINI_API_KEY` di `.env.local`, lalu jalankan ulang aplikasi. |
+| Koreksi jawaban otomatis error | Kunci AI salah/kosong. Periksa kunci di `.env.local` — `GROQ_API_KEY` (atau `GEMINI_API_KEY` bila `AI_PROVIDER=gemini`), lalu jalankan ulang aplikasi. |
 | Peringatan "GPS Belum Diaktifkan" terus muncul | Browser memblokir lokasi. Klik ikon gembok di address bar → izinkan **Location** → klik "Coba Lagi". |
 | "npm tidak dikenali" | Node.js belum terpasang. Ulangi Langkah 2, lalu tutup & buka ulang Command Prompt / Terminal. |
 

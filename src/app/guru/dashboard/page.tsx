@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import PengumumanFeed from '@/components/PengumumanFeed';
 
 export default function GuruDashboard() {
   const { userId, loading: userLoading } = useCurrentUser();
@@ -79,21 +80,24 @@ export default function GuruDashboard() {
         </div>
       </div>
 
+      <PengumumanFeed role="guru" />
+
+      {/* Kartu dapat diklik → Kelas Saya (revisi A1). */}
       <div className="stats-grid mb-4">
-        <div className="stat-card">
+        <Link href="/guru/kelas" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="stat-icon bg-green">👨‍🎓</div>
           <div className="stat-info">
             <span className="label">Siswa Diajar</span>
             <span className="value">{totalSiswa}</span>
           </div>
-        </div>
-        <div className="stat-card">
+        </Link>
+        <Link href="/guru/kelas" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="stat-icon bg-blue">🏫</div>
           <div className="stat-info">
             <span className="label">Kelas Diampu</span>
             <span className="value">{totalKelas}</span>
           </div>
-        </div>
+        </Link>
       </div>
 
       <div className="grid-2">

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { AiScoreError, isPilihanGandaBenar, scoreEssayWithAi } from '@/lib/aiScore';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 // Penilaian dijalankan di server agar kunci jawaban (soal_ujian_kunci) tidak pernah
 // sampai ke browser siswa — policy baca soal_ujian sendiri terbuka untuk guru.
@@ -8,6 +9,9 @@ const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+// Batas panggilan AI bersamaan saat mengoreksi soal uraian (agar tidak membanjiri API).
+const AI_SCORE_CONCURRENCY = 4;
 
 type JawabanMasuk = { soal_id: string; jawaban_teks?: string | string[] | null; foto_url?: string | null };
 
@@ -94,10 +98,13 @@ export async function POST(req: Request) {
 
     const kunciMap = new Map((kunciList || []).map((k: any) => [k.soal_id, k.kunci_jawaban]));
 
-    const inserts: any[] = [];
-    const hasil: any[] = [];
+    // Nilai tiap jawaban. Soal uraian memanggil AI dan kini dijalankan PARALEL
+    // (dengan batas konkurensi) — sebelumnya berurutan sehingga siswa menunggu lama
+    // setelah menekan tombol kirim.
+    const inserts: any[] = new Array(jawaban.length);
+    const hasil: any[] = new Array(jawaban.length);
 
-    for (const j of jawaban) {
+    await mapWithConcurrency(jawaban, AI_SCORE_CONCURRENCY, async (j, idx) => {
       const soal: any = soalMap.get(j.soal_id);
       const kunci = kunciMap.get(j.soal_id);
       const nilaiSerialized = serializeJawaban(j.jawaban_teks);
@@ -115,13 +122,13 @@ export async function POST(req: Request) {
           // Kunci belum diatur guru — biar guru yang menilai manual.
           row.skor_ai = null;
           row.feedback_ai = 'Kunci jawaban belum diatur guru.';
-          hasil.push({ soal_id: j.soal_id, tipe: 'pg', skor: null, feedback: row.feedback_ai });
+          hasil[idx] = { soal_id: j.soal_id, tipe: 'pg', skor: null, feedback: row.feedback_ai };
         } else {
           const nilaiUntukDinilai = Array.isArray(j.jawaban_teks) ? j.jawaban_teks : j.jawaban_teks ?? '';
           const benar = isPilihanGandaBenar(nilaiUntukDinilai, kunci);
           row.skor_ai = benar ? 100 : 0;
           row.feedback_ai = benar ? 'Auto-Graded: Benar' : 'Auto-Graded: Salah';
-          hasil.push({ soal_id: j.soal_id, tipe: 'pg', skor: row.skor_ai, feedback: row.feedback_ai });
+          hasil[idx] = { soal_id: j.soal_id, tipe: 'pg', skor: row.skor_ai, feedback: row.feedback_ai };
         }
       } else {
         // Uraian: dibantu AI, guru tetap wajib validasi.
@@ -139,20 +146,20 @@ export async function POST(req: Request) {
           row.feedback_ai = err instanceof AiScoreError ? err.message : 'Gagal menghubungi AI untuk koreksi.';
         }
         // Skor uraian tidak dibocorkan ke siswa — menunggu validasi guru.
-        hasil.push({ soal_id: j.soal_id, tipe: 'uraian', skor: null, feedback: null });
+        hasil[idx] = { soal_id: j.soal_id, tipe: 'uraian', skor: null, feedback: null };
       }
 
-      inserts.push(row);
-    }
+      inserts[idx] = row;
+    });
 
     const { error: insertError } = await supabaseAdmin.from('jawaban_ujian').insert(inserts);
     if (insertError) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
 
-    // UH: tulis rata-rata skor ujian ke nilai per-bab (skor_benar) supaya hasil langsung
-    // muncul di menu Penilaian guru & Nilai Saya siswa. Guru bisa menyesuaikan/validasi lagi.
-    if (ujian?.bab_id && ujian.jenis === 'UH') {
+    // UH: Opsi B — tulis skor PER UJIAN ke `nilai_item` (per item). Trigger DB
+    // menghitung `nilai_uh` bab = rata-rata item. Guru bisa mengoreksi di menu Penilaian.
+    if (ujian?.jenis === 'UH') {
       const skors = inserts
         .map(r => r.skor_ai)
         .filter(v => v != null)
@@ -162,14 +169,14 @@ export async function POST(req: Request) {
         : 0;
 
       const { error: nilaiError } = await supabaseAdmin
-        .from('nilai')
+        .from('nilai_item')
         .upsert(
-          { siswa_id: siswaId, bab_id: ujian.bab_id, skor_benar: Math.round(rata * 100) / 100 },
-          { onConflict: 'siswa_id,bab_id' }
+          { siswa_id: siswaId, item_type: 'ujian', item_id: ujian_id, skor: Math.round(rata * 100) / 100, dinilai_at: new Date().toISOString() },
+          { onConflict: 'siswa_id,item_type,item_id' }
         );
 
       if (nilaiError) {
-        console.error('Gagal menyimpan skor ke nilai:', nilaiError);
+        console.error('Gagal menyimpan nilai_item:', nilaiError);
       }
     }
 

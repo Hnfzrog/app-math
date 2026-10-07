@@ -63,3 +63,55 @@ Close the 23 approved non-photo gaps listed in `foundation/prd.md` → "Gap Clos
 - [x] Presensi manual guru (28 Sep 2026) — input per siswa & sekelas sekaligus dengan foto wajib dari kamera (`CameraCapture`), `status_validasi` langsung `valid`, duplikat dicegah di aplikasi. Sekaligus **perbaikan bug**: status `'hadir'` → `'masuk'` (nilai `'hadir'` ditolak CHECK constraint DB, sehingga presensi siswa tidak pernah tersimpan) + perbaikan badge status di halaman guru.
 - [x] Feedback, Forum & Kamera (28 Sep 2026) — fix kamera presensi (`CameraCapture`: `facingMode` ideal + callback-ref `srcObject`+`.play()` + error handling), enhance Forum Belajar (thread/edit/hapus/realtime `*`/notif `trg_notif_forum`), feedback satu arah guru→siswa (tugas per-bab `nilai.umpan_balik_file_url` + ujian `ujian_feedback` + `trg_notif_ujian_feedback`).
 - [ ] Photos — DEFERRED (bucket belum siap)
+
+## Revisi & Tambahan Fitur (6 Okt 2026) — Plan
+
+Sumber: `revisi-update.md`; spec di `prd.md` → "Revisi & Tambahan Fitur (6 Okt 2026)"; tracker kode di `revisi-tracker.md` (root).
+
+### Batch 0 — Auth (mandiri, prioritas tertinggi)
+- B1: migrasi `@supabase/ssr` + retry `getSession()` + `onAuthStateChange` + loading/disabled + logging redirect + lewati prefetch.
+
+### Batch 1 — Revisi cepat & performa
+- A1: kartu dashboard klikable (siswa & guru).
+- D1: jumlah soal di kartu daftar ujian/tugas.
+- D2: paralelisasi penilaian AI pada submit.
+
+### Batch 2 — Redesain penilaian
+- E2: penilaian per bab multi-komponen (`nilai_komponen`) + remedial.
+- E3: penilaian ujian UTS/UAS panel benar/salah per siswa.
+
+### Batch 3 — Fitur baru
+- C1/C2: pengumuman admin & guru + notifikasi.
+- D3: pembahasan tugas/ujian (terbit H+1 / jadwal / override).
+- D4: mode ujian fullscreen + deteksi pelanggaran + durasi keluar.
+
+### Progress
+- [ ] Batch 0 — B1 Auth
+- [ ] Batch 1 — A1 / D1 / D2
+- [ ] Batch 2 — E2 / E3
+- [ ] Batch 3 — C1/C2 / D3 / D4
+
+## Rapor (cetak & perangkingan) — 7 Okt 2026 — Plan
+
+Sumber: spec `prd.md` → "Rapor (cetak & perangkingan) — 7 Okt 2026"; schema `database.md` #22–#25.
+
+### Batch
+- R1: schema — `bab.semester`, tabel `rapor`, tabel `rapor_siswa`, `pengaturan.kkm` + RLS.
+- R2: pure logic `src/lib/rapor.ts` (nilai huruf, deskripsi capaian, rata-rata, ketidakhadiran) + unit test.
+- R3: PDF rapor formal `src/lib/raporPdf.ts`.
+- R4: halaman guru `/guru/rapor` (pilih kelas+semester, modal deskripsi, terbitkan, unduh per siswa, perangkingan).
+- R5: siswa `/siswa/nilai` — tombol Unduh Rapor gated `rapor.is_terbit`.
+- R6: navigasi guru (sidebar) + semester di form tambah bab.
+
+### Progress
+- [x] R1 — schema (`bab.semester`, `rapor`, `rapor_siswa`, `pengaturan.kkm` + RLS)
+- [x] R2 — pure logic `src/lib/rapor.ts` + unit test (20 case)
+- [x] R3 — PDF rapor formal `src/lib/raporPdf.ts`
+- [x] R4 — halaman guru `/guru/rapor` (kelas+semester, modal deskripsi, terbitkan, unduh per siswa, perangkingan)
+- [x] R5 — halaman siswa `/siswa/nilai` (tombol Unduh Rapor gated `rapor.is_terbit`)
+- [x] R6 — navigasi guru (sidebar) + semester di form tambah bab
+- [x] R7 — E2E Playwright `e2e/rapor.spec.ts` (R1–R5) + **bug fix**: `/guru/rapor` macet "Loading" (gate `loading` init `true` memblokir pemilih kelas). Full suite E2E 23/23 hijau.
+
+## Provider AI — pindah ke Groq (7 Okt 2026)
+
+Gemini kena limit free tier → provider koreksi esai kini **swappable** (`AI_PROVIDER`, default **Groq** `openai/gpt-oss-120b`; Gemini alternatif). `src/lib/aiScore.ts` di-refactor jadi adapter per-provider + `aiScore.test.ts`. Model Llama Groq sudah deprecated (shutdown 16 Agu 2026) sehingga default memakai `openai/gpt-oss-120b`. Docs (README, INSTALASI, panduan HTML, database.md, prd.md) disinkronkan.

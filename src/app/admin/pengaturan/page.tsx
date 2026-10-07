@@ -13,7 +13,8 @@ export default function AdminPengaturan() {
     kop_surat: '',
     latitude_pusat: '',
     longitude_pusat: '',
-    radius_meter: '50'
+    radius_meter: '50',
+    kkm: '75'
   });
 
   useEffect(() => {
@@ -31,7 +32,8 @@ export default function AdminPengaturan() {
         kop_surat: data.kop_surat || '',
         latitude_pusat: data.latitude_pusat != null ? String(data.latitude_pusat) : '',
         longitude_pusat: data.longitude_pusat != null ? String(data.longitude_pusat) : '',
-        radius_meter: data.radius_meter != null ? String(data.radius_meter) : '50'
+        radius_meter: data.radius_meter != null ? String(data.radius_meter) : '50',
+        kkm: data.kkm != null ? String(data.kkm) : '75'
       });
     }
     setLoading(false);
@@ -45,7 +47,8 @@ export default function AdminPengaturan() {
       kop_surat: form.kop_surat,
       latitude_pusat: form.latitude_pusat ? parseFloat(form.latitude_pusat) : null,
       longitude_pusat: form.longitude_pusat ? parseFloat(form.longitude_pusat) : null,
-      radius_meter: form.radius_meter ? parseInt(form.radius_meter) : 50
+      radius_meter: form.radius_meter ? parseInt(form.radius_meter) : 50,
+      kkm: form.kkm ? parseFloat(form.kkm) : 75
     };
 
     let error;
@@ -122,6 +125,11 @@ export default function AdminPengaturan() {
             <div className="form-group mt-3">
               <label>Kop Surat</label>
               <input className="form-control" value={form.kop_surat} onChange={e => set('kop_surat', e.target.value)} placeholder="Contoh: Terakreditasi A" />
+            </div>
+            <div className="form-group mt-3">
+              <label>KKM (ambang ketuntasan rapor)</label>
+              <input type="number" className="form-control" value={form.kkm} onChange={e => set('kkm', e.target.value)} min="0" max="100" step="0.1" />
+              <small className="text-muted">Nilai minimum untuk "mencapai ketuntasan" di kolom KKM rapor (default 75).</small>
             </div>
           </div>
 

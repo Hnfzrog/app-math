@@ -12,6 +12,11 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/
+.e2e-state.json
 
 # next.js
 /.next/
@@ -42,3 +47,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# lokal — kredensial & dump (jangan di-commit)
+db.md
+account.md
+backup.sql
+check_models.js
+delete_error.log

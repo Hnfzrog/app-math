@@ -41,8 +41,8 @@ export default function LoginPage() {
       return;
     }
 
-    document.cookie = `user-role=${userData.role}; path=/`;
-    
+    // Sesi disimpan otomatis sebagai cookie oleh klien @supabase/ssr — tidak ada
+    // lagi cookie `user-role` manual yang bisa tidak tersinkron dengan sesi asli.
     if (userData.role === 'admin') {
       router.push('/admin/dashboard');
     } else if (userData.role === 'guru') {
@@ -64,24 +64,26 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className={styles.form}>
           <div className={styles.inputGroup}>
-            <label>Email</label>
-            <input 
-              type="email" 
-              placeholder="Contoh: andi@siswa.com" 
+            <label htmlFor="login-email">Email</label>
+            <input
+              id="login-email"
+              type="email"
+              placeholder="Contoh: andi@siswa.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              required 
+              required
             />
           </div>
-          
+
           <div className={styles.inputGroup}>
-            <label>Password</label>
-            <input 
-              type="password" 
-              placeholder="••••••••" 
+            <label htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required 
+              required
             />
           </div>
 

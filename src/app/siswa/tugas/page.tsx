@@ -5,6 +5,8 @@ import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import PhotoUpload from '@/components/PhotoUpload';
 import { uploadFile, fileUrl } from '@/lib/uploadClient';
+import { mapWithConcurrency } from '@/lib/concurrency';
+import { pembahasanTerbit } from '@/lib/pembahasan';
 
 export default function SiswaTugas() {
   const { userId: SISWA_ID, userName: namaSiswa, loading: userLoading } = useCurrentUser();
@@ -20,6 +22,7 @@ export default function SiswaTugas() {
   const [jawabanLinks, setJawabanLinks] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<'milih_kuis' | 'mengerjakan' | 'loading' | 'selesai'>('milih_kuis');
   const [hasil, setHasil] = useState<{ totalSkor: number, detail: any[] } | null>(null);
+  const [soalCount, setSoalCount] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (SISWA_ID) fetchAvailableKuis();
@@ -60,20 +63,34 @@ export default function SiswaTugas() {
           .in('bab_id', babIds)
           .in('tipe', ['lkpd', 'banksoal', 'evaluasi']);
           
-        const kontenWithBab = konten?.map(k => {
+        // Sembunyikan item remedial kecuali siswa terdaftar di remedial_target.
+        const { data: rt } = await supabase
+          .from('remedial_target')
+          .select('item_id')
+          .eq('item_type', 'konten')
+          .eq('siswa_id', SISWA_ID);
+        const remedialDiizinkan = new Set((rt || []).map((r) => r.item_id));
+        const kontenTerlihat = (konten || []).filter((k) => !k.is_remedial || remedialDiizinkan.has(k.id));
+
+        const kontenWithBab = kontenTerlihat.map(k => {
           const bab = babs?.find(b => b.id === k.bab_id);
           return { ...k, judul_bab: bab ? bab.judul : 'Bab Tidak Diketahui' };
         });
           
-        setKuisList(kontenWithBab || []);
+        setKuisList(kontenWithBab);
 
         // 4. Cek kuis mana saja yang sudah dikerjakan
-        if (konten && konten.length > 0) {
-          const kuisIds = konten.map(k => k.id);
+        if (kontenTerlihat.length > 0) {
+          const kuisIds = kontenTerlihat.map(k => k.id);
           // Cari soal dari konten ini
           const { data: soals } = await supabase.from('soal').select('id, konten_id').in('konten_id', kuisIds);
           
           if (soals && soals.length > 0) {
+            // Jumlah soal per konten — ditampilkan di daftar tugas.
+            const counts: Record<string, number> = {};
+            soals.forEach(s => { counts[s.konten_id] = (counts[s.konten_id] || 0) + 1; });
+            setSoalCount(counts);
+
             const soalIds = soals.map(s => s.id);
             // Cari jawaban_siswa
             const { data: jawabans } = await supabase.from('jawaban_siswa').select('soal_id').eq('siswa_id', SISWA_ID).in('soal_id', soalIds);
@@ -114,10 +131,7 @@ export default function SiswaTugas() {
       if (document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().catch(e => console.log('Fullscreen failed:', e));
       }
-      const sidebar = document.querySelector('.sidebar') as HTMLElement;
-      const topbar = document.querySelector('.topbar') as HTMLElement;
-      if (sidebar) sidebar.style.display = 'none';
-      if (topbar) topbar.style.display = 'none';
+      document.body.classList.add('exam-mode');
     }, 100);
   };
 
@@ -184,6 +198,33 @@ export default function SiswaTugas() {
     const dbInserts: any[] = [];
     const soalIds: string[] = [];
 
+    // Pra-hitung skor AI untuk soal uraian secara PARALEL (dulu satu per satu di
+    // dalam loop → pengiriman terasa lama). Hasil dipakai di dalam loop di bawah.
+    const uraianItems = soalKuis.filter((s) => s.tipe === 'uraian');
+    const uraianScores = await mapWithConcurrency(uraianItems, 4, async (item) => {
+      const jawabSiswaUraian = jawaban[item.id] || '';
+      try {
+        const res = await fetch('/api/ai/score', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pertanyaan: item.pertanyaan,
+            kunciJawaban: item.kunci_jawaban,
+            jawabanSiswa: jawabSiswaUraian
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || typeof data.skor !== 'number') {
+          throw new Error(data.error || data.feedback || 'Invalid response from AI');
+        }
+        return { id: item.id as string, skor: data.skor as number, feedback: data.feedback as string, ok: true };
+      } catch {
+        return { id: item.id as string, skor: 0, feedback: 'Gagal koreksi AI', ok: false };
+      }
+    });
+    const aiMap: Record<string, { skor: number; feedback: string; ok: boolean }> = {};
+    uraianScores.forEach((r) => { aiMap[r.id] = r; });
+
     // Evaluasi setiap soal
     for (const item of soalKuis) {
       soalIds.push(item.id);
@@ -226,43 +267,28 @@ export default function SiswaTugas() {
         });
 
       } else if (item.tipe === 'uraian') {
-        // Panggil AI
+        // Skor AI diambil dari hasil pra-hitung paralel (aiMap) — tidak ada
+        // panggilan jaringan di dalam loop, jadi tidak menunggu berurutan.
+        const data = aiMap[item.id];
         try {
-          const res = await fetch('/api/ai/score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              pertanyaan: item.pertanyaan,
-              kunciJawaban: item.kunci_jawaban,
-              jawabanSiswa: jawabSiswa
-            })
-          });
-          const data = await res.json();
-          
-          if (!res.ok || typeof data.skor !== 'number') {
-            throw new Error(data.error || data.feedback || 'Invalid response from AI');
-          }
-          
+          if (!data || !data.ok) throw new Error('AI tidak tersedia');
           sumAi += data.skor;
-          
           detailHasil.push({
             soal: item.pertanyaan,
             skor: data.skor,
             maksSkor: 100,
             feedback: `(AI) ${data.feedback}`
           });
-
           dbInserts.push({
             soal_id: item.id,
             siswa_id: SISWA_ID,
             jawaban: jawabSiswa,
-            skor_ai: data.skor, // Selalu simpan skala 0-100 dari AI
+            skor_ai: data.skor,
             feedback_ai: data.feedback,
             status: 'pending_verifikasi',
             file_url: fileUrlMap[item.id] || null
           });
-
-        } catch (e: any) {
+        } catch {
           detailHasil.push({
             soal: item.pertanyaan,
             skor: 0,
@@ -313,14 +339,7 @@ export default function SiswaTugas() {
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(e => console.log(e));
     }
-    const sidebar = document.querySelector('.sidebar') as HTMLElement;
-    const topbar = document.querySelector('.topbar') as HTMLElement;
-    if (sidebar) {
-      sidebar.style.display = ''; // Reset inline style
-    }
-    if (topbar) {
-      topbar.style.display = ''; // Reset inline style
-    }
+    document.body.classList.remove('exam-mode');
   };
 
   if (loading || userLoading) return <div className="text-center mt-4">Loading data...</div>;
@@ -334,13 +353,14 @@ export default function SiswaTugas() {
         ) : (
           <div className="table-responsive mt-3">
             <table className="table">
-              <thead><tr><th>Bab / Topik</th><th>Judul Tugas</th><th>Tipe</th><th>Status</th><th>Aksi</th></tr></thead>
+              <thead><tr><th>Bab / Topik</th><th>Judul Tugas</th><th>Tipe</th><th>Jumlah Soal</th><th>Status</th><th>Aksi</th></tr></thead>
               <tbody>
                 {kuisList.map(kuis => (
                   <tr key={kuis.id}>
                     <td>{kuis.judul_bab}</td>
                     <td><strong>{kuis.judul}</strong></td>
                     <td><span className="badge badge-info">{kuis.tipe.toUpperCase()}</span></td>
+                    <td>{soalCount[kuis.id] ?? '-'}</td>
                     <td>
                       {submittedKuis[kuis.id] ? (
                         <span className="badge badge-success">Selesai</span>
@@ -387,6 +407,10 @@ export default function SiswaTugas() {
           </ul>
         </div>
         
+        {pembahasanTerbit(selectedKuis) && (
+          <a href={fileUrl(selectedKuis.pembahasan_file_url)!} target="_blank" rel="noopener noreferrer" className="btn btn-outline mt-3">📘 Lihat Pembahasan</a>
+        )}
+
         <button onClick={() => {
           setStatus('milih_kuis');
           setSelectedKuis(null);
@@ -394,10 +418,7 @@ export default function SiswaTugas() {
           if (document.fullscreenElement) {
             document.exitFullscreen().catch(e => console.log(e));
           }
-          const sidebar = document.querySelector('.sidebar') as HTMLElement;
-          const topbar = document.querySelector('.topbar') as HTMLElement;
-          if (sidebar) sidebar.style.display = '';
-          if (topbar) topbar.style.display = '';
+          document.body.classList.remove('exam-mode');
         }} className="btn btn-primary mt-4">Kembali ke Daftar Tugas</button>
       </div>
     );
@@ -486,17 +507,19 @@ export default function SiswaTugas() {
           />
         )}
 
-        <div className="form-group mt-3">
-          <label>Lampiran {soal.butuh_upload ? '(Wajib)' : '(opsional)'}: PDF, Word, Excel, Foto — maks 2MB</label>
-          <PhotoUpload
-            value={null}
-            onFileChange={(file) => setJawabanFiles(prev => ({ ...prev, [soal.id]: file }))}
-            onLinkChange={(url) => setJawabanLinks(prev => ({ ...prev, [soal.id]: url }))}
-            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,image/*"
-            showDrive
-            label="Lampiran"
-          />
-        </div>
+        {soal.butuh_upload && (
+          <div className="form-group mt-3">
+            <label>Lampiran (Wajib): PDF, Word, Excel, Foto — maks 2MB</label>
+            <PhotoUpload
+              value={null}
+              onFileChange={(file) => setJawabanFiles(prev => ({ ...prev, [soal.id]: file }))}
+              onLinkChange={(url) => setJawabanLinks(prev => ({ ...prev, [soal.id]: url }))}
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,image/*"
+              showDrive
+              label="Lampiran"
+            />
+          </div>
+        )}
       </div>
       
       <div className="d-flex justify-between mt-4 pt-3" style={{ borderTop: '1px solid var(--slate-200)' }}>

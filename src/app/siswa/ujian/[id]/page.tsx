@@ -1,5 +1,5 @@
 'use client';
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import PhotoUpload from '@/components/PhotoUpload';
 import { uploadImage, fileUrl } from '@/lib/uploadClient';
 import { badgeStatusUjian, formatJadwal, labelStatusUjian, statusUjian } from '@/lib/jadwalUjian';
+import { pembahasanTerbit } from '@/lib/pembahasan';
 
 export default function SiswaUjianTake({ params }: { params: Promise<{ id: string }> }) {
   // Next.js 16 menghapus akses params sinkron — wajib di-await lewat use().
@@ -37,6 +38,10 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
   // Feedback guru untuk ujian ini (satu arah: guru → siswa)
   const [feedback, setFeedback] = useState<any>(null);
 
+  // Mode ujian (D4): fullscreen + deteksi pelanggaran
+  const [pelanggaran, setPelanggaran] = useState(0);
+  const hiddenAtRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (userId) fetchUjianDetail();
   }, [userId]);
@@ -65,6 +70,55 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
     }
     return () => clearInterval(timer);
   }, [step, timeLeft]);
+
+  // Catat pelanggaran mode ujian ke pelanggaran_ujian.
+  const catatPelanggaran = async (jenis: 'pindah_tab' | 'keluar_halaman' | 'keluar_fullscreen', durasiDetik?: number) => {
+    if (!userId) return;
+    setPelanggaran((p) => p + 1);
+    const { error } = await supabase.from('pelanggaran_ujian').insert({
+      ujian_id: ujianId,
+      siswa_id: userId,
+      jenis,
+      durasi_detik: durasiDetik != null ? Math.round(durasiDetik) : null,
+    });
+    if (error) console.warn('[ujian] gagal mencatat pelanggaran:', error.message);
+  };
+
+  // Mode ujian: kunci navigasi (sembunyikan sidebar/topbar) + deteksi pelanggaran (D4).
+  useEffect(() => {
+    if (step !== 'exam') return;
+
+    // Tandai mode ujian → notifikasi popup (OS/toast) ditahan selama siswa mengerjakan.
+    (window as unknown as { __examMode?: boolean }).__examMode = true;
+
+    // Kunci navigasi: kelas di <body> (restore andal, tak bocor ke halaman lain).
+    document.body.classList.add('exam-mode');
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenAtRef.current = Date.now();
+      } else if (hiddenAtRef.current != null) {
+        const durasi = (Date.now() - hiddenAtRef.current) / 1000;
+        hiddenAtRef.current = null;
+        catatPelanggaran('pindah_tab', durasi);
+      }
+    };
+    const onFullscreen = () => {
+      if (!document.fullscreenElement) catatPelanggaran('keluar_fullscreen');
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+      // Akhiri mode ujian → notifikasi kembali tampil.
+      (window as unknown as { __examMode?: boolean }).__examMode = false;
+      // Buka kunci navigasi + lepas fullscreen saat keluar mode ujian.
+      document.body.classList.remove('exam-mode');
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    };
+  }, [step]);
 
   const fetchUjianDetail = async () => {
     setLoading(true);
@@ -110,6 +164,8 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
       customAlert('Harap setujui pakta integritas terlebih dahulu!', true);
       return;
     }
+    // Minta fullscreen di dalam gesture klik agar diizinkan browser.
+    document.documentElement.requestFullscreen?.().catch((e) => console.warn('Fullscreen gagal:', e));
     setStep('exam');
   };
 
@@ -283,6 +339,7 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
             <li>Pastikan koneksi internet stabil selama mengerjakan.</li>
             <li>Jawaban tidak dapat diubah setelah dikumpulkan.</li>
             <li>Waktu akan terus berjalan; saat habis, jawaban dikirim otomatis.</li>
+            <li>Saat ujian dimulai, layar masuk mode fullscreen. Jangan keluar dari halaman ujian — setiap pelanggaran (pindah tab/keluar fullscreen) beserta durasinya akan dicatat.</li>
           </ol>
         </div>
         <button className="btn btn-primary btn-block" onClick={() => setStep('pakta')} style={{ padding: '12px' }}>
@@ -340,6 +397,13 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
             {feedback.file_url && (
               <a href={fileUrl(feedback.file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat File Perbaikan</a>
             )}
+          </div>
+        )}
+
+        {pembahasanTerbit(ujian) && (
+          <div className="card card-body mb-4" style={{ borderLeft: '4px solid var(--success)' }}>
+            <h3 className="mb-2" style={{ fontSize: '16px' }}>📘 Pembahasan</h3>
+            <a href={fileUrl(ujian.pembahasan_file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat Pembahasan</a>
           </div>
         )}
 
@@ -419,8 +483,13 @@ export default function SiswaUjianTake({ params }: { params: Promise<{ id: strin
         <div>
           <h3 style={{ margin: 0 }}>{ujian.jenis}{ujian.deskripsi ? ` — ${ujian.deskripsi}` : ''}</h3>
         </div>
-        <div className={`badge ${timeLeft < 300 ? 'badge-danger' : 'badge-primary'}`} style={{ fontSize: '1.2rem', padding: '8px 16px' }}>
-          ⏳ {formatTime(timeLeft)}
+        <div className="d-flex align-center gap-2">
+          {pelanggaran > 0 && (
+            <span className="badge badge-danger" title="Pelanggaran mode ujian tercatat">⚠️ Pelanggaran: {pelanggaran}</span>
+          )}
+          <div className={`badge ${timeLeft < 300 ? 'badge-danger' : 'badge-primary'}`} style={{ fontSize: '1.2rem', padding: '8px 16px' }}>
+            ⏳ {formatTime(timeLeft)}
+          </div>
         </div>
       </div>
 

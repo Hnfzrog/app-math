@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import PengumumanFeed from '@/components/PengumumanFeed';
 
 export default function SiswaDashboard() {
   const [loading, setLoading] = useState(true);
@@ -185,38 +186,41 @@ export default function SiswaDashboard() {
         </div>
       )}
 
+      <PengumumanFeed role="siswa" />
+
       <div className="grid-2">
         <div className="d-flex flex-column gap-4">
           {/* Persebaran: Materi / LKPD / Tugas / Ujian */}
+          {/* Kartu dapat diklik → langsung ke halaman terkait (revisi A1). */}
           <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-            <div className="stat-card">
+            <Link href="/siswa/materi" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="stat-icon bg-blue">📚</div>
               <div className="stat-info">
                 <span className="label">Materi</span>
                 <span className="value">{materiCount}</span>
               </div>
-            </div>
-            <div className="stat-card">
+            </Link>
+            <Link href="/siswa/tugas" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="stat-icon bg-amber">📝</div>
               <div className="stat-info">
                 <span className="label">LKPD</span>
                 <span className="value">{lkpdDone}/{lkpdTotal}</span>
               </div>
-            </div>
-            <div className="stat-card">
+            </Link>
+            <Link href="/siswa/tugas" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="stat-icon bg-green">✏️</div>
               <div className="stat-info">
                 <span className="label">Tugas</span>
                 <span className="value">{tugasDone}/{tugasTotal}</span>
               </div>
-            </div>
-            <div className="stat-card">
+            </Link>
+            <Link href="/siswa/ujian" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="stat-icon bg-indigo">🧪</div>
               <div className="stat-info">
                 <span className="label">Ujian</span>
                 <span className="value">{ujianDone}/{ujianTotal}</span>
               </div>
-            </div>
+            </Link>
           </div>
 
           {/* Grafik pencapaian per bab */}

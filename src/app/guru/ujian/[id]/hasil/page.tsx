@@ -5,6 +5,11 @@ import { customAlert } from '@/lib/customAlert';
 import { uploadFile, fileUrl } from '@/lib/uploadClient';
 import Link from 'next/link';
 
+type Siswa = { id: string; nama: string; nisn: string };
+
+// Skor >= ambang dianggap "benar" (untuk hitungan benar/salah yang ditampilkan).
+const BENAR_THRESHOLD = 70;
+
 export default function GuruUjianHasil({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = use(params);
   const ujianId = unwrappedParams.id;
@@ -13,17 +18,24 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
   const [ujian, setUjian] = useState<any>(null);
   const [soalList, setSoalList] = useState<any[]>([]);
   const [kunciMap, setKunciMap] = useState<Record<string, string>>({});
-  const [siswaList, setSiswaList] = useState<any[]>([]);
+  const [siswaList, setSiswaList] = useState<Siswa[]>([]);
   // jawabanMap[siswa_id][soal_id] = baris jawaban_ujian
   const [jawabanMap, setJawabanMap] = useState<Record<string, Record<string, any>>>({});
-  // nilaiEdit[jawaban_id] = skor_final yang diketik guru
+  // nilaiEdit[jawaban_id] = skor_final yang diketik/di-toggle guru
   const [nilaiEdit, setNilaiEdit] = useState<Record<string, string>>({});
   const [terpilih, setTerpilih] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Modal Penilaian per siswa (kiri jawaban / kanan panel guru)
+  const [penilaianSiswa, setPenilaianSiswa] = useState<Siswa | null>(null);
+
   // Feedback guru per siswa (ujian_feedback)
   const [feedbackMap, setFeedbackMap] = useState<Record<string, any>>({});
-  const [feedbackPendingFile, setFeedbackPendingFile] = useState<Record<string, File | null>>({});
-  const [feedbackLink, setFeedbackLink] = useState<Record<string, string>>({});
+  const [fbSiswa, setFbSiswa] = useState<Siswa | null>(null);
+  const [fbText, setFbText] = useState('');
+  const [fbFile, setFbFile] = useState<File | null>(null);
+  const [fbLink, setFbLink] = useState('');
+  const [savingFb, setSavingFb] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -53,7 +65,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
     const soal = dataSoal || [];
     setSoalList(soal);
 
-    const soalIds = soal.map((s: any) => s.id);
+    const soalIds = soal.map((s) => s.id);
 
     // Kunci jawaban (guru pengampu kelas ini boleh membacanya)
     if (soalIds.length > 0) {
@@ -63,7 +75,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
         .in('soal_id', soalIds);
 
       const map: Record<string, string> = {};
-      (kunci || []).forEach((k: any) => { map[k.soal_id] = k.kunci_jawaban; });
+      (kunci || []).forEach((k) => { map[k.soal_id] = k.kunci_jawaban; });
       setKunciMap(map);
     }
 
@@ -73,9 +85,12 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
       .select('siswa_id, users(nama, nisn)')
       .eq('kelas_id', dataUjian.kelas_id);
 
-    const siswa = (dataSiswa || [])
-      .map((s: any) => ({ id: s.siswa_id, nama: s.users?.nama || '(tanpa nama)', nisn: s.users?.nisn || '' }))
-      .sort((a: any, b: any) => a.nama.localeCompare(b.nama));
+    const siswa: Siswa[] = (dataSiswa || [])
+      .map((s) => {
+        const u = s.users as unknown as { nama?: string; nisn?: string } | null;
+        return { id: s.siswa_id, nama: u?.nama || '(tanpa nama)', nisn: u?.nisn || '' };
+      })
+      .sort((a, b) => a.nama.localeCompare(b.nama));
     setSiswaList(siswa);
 
     // Semua jawaban untuk soal-soal ujian ini (policy guru: hanya ujian kelasnya)
@@ -86,7 +101,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
         .in('soal_id', soalIds);
 
       const map: Record<string, Record<string, any>> = {};
-      (jawaban || []).forEach((j: any) => {
+      (jawaban || []).forEach((j) => {
         if (!map[j.siswa_id]) map[j.siswa_id] = {};
         map[j.siswa_id][j.soal_id] = j;
       });
@@ -98,7 +113,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
     // Feedback guru per siswa (ujian_feedback)
     const { data: fb } = await supabase.from('ujian_feedback').select('*').eq('ujian_id', ujianId);
     const fbMap: Record<string, any> = {};
-    (fb || []).forEach((f: any) => { fbMap[f.siswa_id] = f; });
+    (fb || []).forEach((f) => { fbMap[f.siswa_id] = f; });
     setFeedbackMap(fbMap);
 
     setLoading(false);
@@ -119,51 +134,47 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
     return teks;
   };
 
-  const nilaiTersimpan = (j: any): number | null => {
-    if (j?.skor_final != null) return Number(j.skor_final);
-    if (j?.skor_ai != null) return Number(j.skor_ai);
+  // Skor efektif: hasil edit guru → skor_final tersimpan → skor AI.
+  const skorEfektif = (j: any): number | null => {
+    if (!j) return null;
+    const edited = nilaiEdit[j.id];
+    if (edited !== undefined && edited !== '') {
+      const n = parseFloat(edited);
+      return Number.isNaN(n) ? null : n;
+    }
+    if (j.skor_final != null) return Number(j.skor_final);
+    if (j.skor_ai != null) return Number(j.skor_ai);
     return null;
   };
 
-  const ringkasanSiswa = (siswaId: string) => {
+  const hitungBenarSalah = (siswaId: string) => {
     const jw = jawabanSiswa(siswaId);
-    let pgBenar = 0, pgTotal = 0, esaiMenunggu = 0, semuaFinal = true, adaNilai = false;
-    let totalNilai = 0, totalSoal = 0;
-
-    soalList.forEach(soal => {
+    let benar = 0, salah = 0;
+    soalList.forEach((soal) => {
       const j = jw[soal.id];
       if (!j) return;
-
-      if (soal.tipe === 'pg') {
-        pgTotal++;
-        if (Number(j.skor_ai) === 100) pgBenar++;
-      } else if (j.status !== 'final') {
-        esaiMenunggu++;
-      }
-
-      if (j.status !== 'final') semuaFinal = false;
-      const n = nilaiTersimpan(j);
-      if (n != null) { totalNilai += n; totalSoal++; adaNilai = true; }
+      const skor = skorEfektif(j);
+      if (skor == null) return;
+      if (skor >= BENAR_THRESHOLD) benar++;
+      else salah++;
     });
+    return { benar, salah };
+  };
 
-    return {
-      pgBenar,
-      pgTotal,
-      esaiMenunggu,
-      semuaFinal,
-      rataRata: adaNilai && totalSoal > 0 ? totalNilai / totalSoal : null,
-    };
+  // Skor otomatis 0/100 untuk pilgan (skor_ai), dan rubrik AI untuk esai.
+  const toggleBenarSalah = (jawabanId: string, benar: boolean) => {
+    setNilaiEdit((prev) => ({ ...prev, [jawabanId]: benar ? '100' : '0' }));
   };
 
   const togglePilih = (siswaId: string) => {
-    setTerpilih(prev => prev.includes(siswaId) ? prev.filter(s => s !== siswaId) : [...prev, siswaId]);
+    setTerpilih((prev) => (prev.includes(siswaId) ? prev.filter((s) => s !== siswaId) : [...prev, siswaId]));
   };
 
-  const siswaBisaValidasi = siswaList.filter(s => sudahMengerjakan(s.id));
+  const siswaBisaValidasi = siswaList.filter((s) => sudahMengerjakan(s.id));
   const semuaTerpilih = siswaBisaValidasi.length > 0 && terpilih.length === siswaBisaValidasi.length;
 
   const togglePilihSemua = () => {
-    setTerpilih(semuaTerpilih ? [] : siswaBisaValidasi.map(s => s.id));
+    setTerpilih(semuaTerpilih ? [] : siswaBisaValidasi.map((s) => s.id));
   };
 
   const validasi = async (siswaIds: string[]) => {
@@ -199,7 +210,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
 
     // Dijalankan paralel — satu kelas bisa berarti ratusan baris jawaban.
     const hasilUpdate = await Promise.all(
-      rows.map(r =>
+      rows.map((r) =>
         supabase
           .from('jawaban_ujian')
           .update({ skor_final: r.skor_final, status: r.status, dinilai_at: r.dinilai_at })
@@ -207,7 +218,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
       )
     );
 
-    const gagal = hasilUpdate.find(h => h.error);
+    const gagal = hasilUpdate.find((h) => h.error);
 
     if (gagal?.error) {
       setSaving(false);
@@ -217,26 +228,24 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
       return;
     }
 
-    // UH: masukkan rata-rata skor ujian ke nilai per-bab (skor_benar), supaya muncul
-    // di menu Penilaian (guru) dan Nilai Saya (siswa). UTS/UAS tidak punya bab_id.
+    // UH: masukkan rata-rata skor ujian ke komponen UH pada nilai per-bab (nilai_uh),
+    // supaya muncul di menu Penilaian (guru) dan Nilai Saya (siswa). UTS/UAS tidak punya bab_id.
     if (ujian?.bab_id && ujian.jenis === 'UH') {
-      const finalByJawaban = new Map(rows.map(r => [r.id, r.skor_final]));
-      const nilaiRows = siswaIds.map(siswaId => {
+      const finalByJawaban = new Map(rows.map((r) => [r.id, r.skor_final]));
+      const nilaiRows = siswaIds.map((siswaId) => {
         const jw = jawabanSiswa(siswaId);
         const skors: number[] = [];
-        soalList.forEach(soal => {
+        soalList.forEach((soal) => {
           const j = jw[soal.id];
           if (!j) return;
           const n = finalByJawaban.get(j.id);
           if (n != null) skors.push(n);
         });
-        const rata = skors.length > 0
-          ? skors.reduce((a, b) => a + b, 0) / skors.length
-          : 0;
+        const rata = skors.length > 0 ? skors.reduce((a, b) => a + b, 0) / skors.length : 0;
         return {
           siswa_id: siswaId,
           bab_id: ujian.bab_id,
-          skor_benar: Math.round(rata * 100) / 100,
+          nilai_uh: Math.round(rata * 100) / 100,
         };
       });
 
@@ -255,41 +264,57 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
 
     setSaving(false);
     setTerpilih([]);
+    setPenilaianSiswa(null);
     fetchData();
-    customAlert(`${siswaIds.length} siswa berhasil divalidasi.`, false);
+    customAlert(`${siswaIds.length} siswa berhasil dinilai.`, false);
   };
 
-  const simpanFeedback = async (siswaId: string) => {
-    const current = feedbackMap[siswaId] || { umpan_balik: '', file_url: null };
+  const bukaPenilaian = (siswa: Siswa) => {
+    setPenilaianSiswa(siswa);
+  };
+
+  const bukaFeedback = (siswa: Siswa) => {
+    setFbSiswa(siswa);
+    setFbText(feedbackMap[siswa.id]?.umpan_balik || '');
+    setFbFile(null);
+    setFbLink('');
+  };
+
+  const simpanFeedback = async () => {
+    if (!fbSiswa) return;
+    const current = feedbackMap[fbSiswa.id] || { file_url: null };
     let fileKey: string | null = current.file_url || null;
-    const pending = feedbackPendingFile[siswaId];
-    const link = feedbackLink[siswaId];
+    setSavingFb(true);
     try {
-      if (pending) fileKey = await uploadFile(pending, 'ujian-feedback');
-      else if (link) fileKey = link;
-    } catch (e: any) {
-      customAlert('Gagal upload file feedback: ' + (e?.message || e), true);
+      if (fbFile) fileKey = await uploadFile(fbFile, 'ujian-feedback');
+      else if (fbLink) fileKey = fbLink;
+    } catch (e) {
+      setSavingFb(false);
+      customAlert('Gagal upload file feedback: ' + (e instanceof Error ? e.message : String(e)), true);
       return;
     }
     const { error } = await supabase.from('ujian_feedback').upsert({
       ujian_id: ujianId,
-      siswa_id: siswaId,
-      umpan_balik: current.umpan_balik || '',
+      siswa_id: fbSiswa.id,
+      umpan_balik: fbText,
       file_url: fileKey,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'ujian_id,siswa_id' });
+    setSavingFb(false);
     if (error) { customAlert('Gagal simpan feedback: ' + error.message, true); return; }
     customAlert('Feedback tersimpan.', false);
     const { data: fb } = await supabase.from('ujian_feedback').select('*').eq('ujian_id', ujianId);
     const fbMap: Record<string, any> = {};
-    (fb || []).forEach((f: any) => { fbMap[f.siswa_id] = f; });
+    (fb || []).forEach((f) => { fbMap[f.siswa_id] = f; });
     setFeedbackMap(fbMap);
-    setFeedbackPendingFile(prev => ({ ...prev, [siswaId]: null }));
-    setFeedbackLink(prev => ({ ...prev, [siswaId]: '' }));
+    setFbSiswa(null);
   };
 
   if (loading) return <div className="p-4 text-center">Loading...</div>;
   if (!ujian) return <div className="p-4 text-center">Ujian tidak ditemukan.</div>;
+
+  const jwPenilaian = penilaianSiswa ? jawabanSiswa(penilaianSiswa.id) : {};
+  const ringkasPenilaian = penilaianSiswa ? hitungBenarSalah(penilaianSiswa.id) : { benar: 0, salah: 0 };
 
   return (
     <div>
@@ -297,7 +322,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
         <div className="d-flex align-center gap-2">
           <Link href={`/guru/ujian/${ujianId}`} className="btn btn-outline" style={{ padding: '0.5rem' }}>←</Link>
           <div>
-            <h2 style={{ margin: 0 }}>Hasil Ujian</h2>
+            <h2 style={{ margin: 0 }}>Penilaian Ujian</h2>
             <p className="text-muted mb-0 text-sm">
               {ujian.kelas?.nama} — {ujian.jenis}{ujian.deskripsi ? ` — ${ujian.deskripsi}` : ''}
             </p>
@@ -308,20 +333,11 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
       <div className="card card-body mb-4">
         <div className="d-flex justify-between align-center">
           <label className="d-flex align-center gap-2" style={{ cursor: 'pointer', margin: 0 }}>
-            <input
-              type="checkbox"
-              checked={semuaTerpilih}
-              onChange={togglePilihSemua}
-              style={{ transform: 'scale(1.2)' }}
-            />
+            <input type="checkbox" checked={semuaTerpilih} onChange={togglePilihSemua} style={{ transform: 'scale(1.2)' }} />
             <span className="font-bold">Pilih semua ({siswaBisaValidasi.length} siswa mengerjakan)</span>
           </label>
-          <button
-            className="btn btn-primary"
-            onClick={() => validasi(terpilih)}
-            disabled={saving || terpilih.length === 0}
-          >
-            {saving ? 'Menyimpan...' : `Validasi ${terpilih.length} Siswa Terpilih`}
+          <button className="btn btn-primary" onClick={() => validasi(terpilih)} disabled={saving || terpilih.length === 0}>
+            {saving ? 'Menyimpan...' : `Simpan Penilaian ${terpilih.length} Siswa`}
           </button>
         </div>
       </div>
@@ -331,70 +347,104 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
           <p className="text-center text-muted my-4">Belum ada siswa di kelas ini.</p>
         </div>
       ) : (
-        siswaList.map(siswa => {
-          const jw = jawabanSiswa(siswa.id);
-          const mengerjakan = sudahMengerjakan(siswa.id);
-          const ringkas = ringkasanSiswa(siswa.id);
-          const semuaFinal = ringkas.semuaFinal && mengerjakan;
+        <div className="card card-body">
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: '40px' }}>
+                    <input type="checkbox" checked={semuaTerpilih} onChange={togglePilihSemua} />
+                  </th>
+                  <th>Nama Siswa</th>
+                  <th>Benar / Salah</th>
+                  <th>Rata-rata</th>
+                  <th>Status</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {siswaList.map((siswa) => {
+                  const mengerjakan = sudahMengerjakan(siswa.id);
+                  const bs = hitungBenarSalah(siswa.id);
+                  const jw = jawabanSiswa(siswa.id);
+                  const semuaFinal = mengerjakan && soalList.every((soal) => !jw[soal.id] || jw[soal.id].status === 'final');
+                  const skors = soalList.map((soal) => skorEfektif(jw[soal.id])).filter((v): v is number => v != null);
+                  const rata = skors.length > 0 ? skors.reduce((a, b) => a + b, 0) / skors.length : null;
+                  return (
+                    <tr key={siswa.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={terpilih.includes(siswa.id)}
+                          disabled={!mengerjakan}
+                          onChange={() => togglePilih(siswa.id)}
+                        />
+                      </td>
+                      <td>
+                        <strong>{siswa.nama}</strong>
+                        {!mengerjakan && <div><span className="badge badge-secondary">belum mengerjakan</span></div>}
+                      </td>
+                      <td>
+                        {mengerjakan
+                          ? <span><span className="badge badge-success">✔ {bs.benar}</span> <span className="badge badge-danger">✘ {bs.salah}</span></span>
+                          : '-'}
+                      </td>
+                      <td>{rata != null ? rata.toFixed(2) : '-'}</td>
+                      <td>
+                        {mengerjakan && (
+                          <span className={`badge ${semuaFinal ? 'badge-success' : 'badge-warning'}`}>
+                            {semuaFinal ? 'FINAL' : 'PENDING'}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="d-flex gap-2" style={{ flexWrap: 'wrap' }}>
+                          <button className="btn btn-sm btn-primary" disabled={!mengerjakan} onClick={() => bukaPenilaian(siswa)}>Penilaian</button>
+                          <button className="btn btn-sm btn-outline" disabled={!mengerjakan} onClick={() => bukaFeedback(siswa)}>Feedback</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-          return (
-            <details key={siswa.id} className="accordion">
-              <summary>
-                <span
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); togglePilih(siswa.id); }}
-                  style={{ display: 'inline-flex', alignItems: 'center' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={terpilih.includes(siswa.id)}
-                    readOnly
-                    disabled={!mengerjakan}
-                    style={{ transform: 'scale(1.2)' }}
-                  />
-                </span>
+      {/* Modal PENILAIAN — kiri jawaban siswa / kanan panel guru */}
+      {penilaianSiswa && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '980px' }}>
+            <div className="modal-header">
+              <h3>Penilaian — {penilaianSiswa.nama}</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setPenilaianSiswa(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="d-flex justify-between align-center mb-3">
+                <span className="badge badge-success">✔ Benar: {ringkasPenilaian.benar}</span>
+                <span className="badge badge-danger">✘ Salah: {ringkasPenilaian.salah}</span>
+              </div>
 
-                <span className="font-bold">{siswa.nama}</span>
+              <div style={{ maxHeight: '62vh', overflowY: 'auto' }}>
+                {soalList.map((soal, idx) => {
+                  const j = jwPenilaian[soal.id];
+                  const kunci = kunciMap[soal.id];
+                  const skor = skorEfektif(j);
+                  const dianggapBenar = skor != null && skor >= BENAR_THRESHOLD;
+                  return (
+                    <div key={soal.id} className="mb-3" style={{ border: '1px solid var(--slate-200)', borderRadius: 'var(--radius-md)', padding: '0.9rem' }}>
+                      <p className="mb-2">
+                        <strong>Soal {idx + 1}</strong>
+                        <span className={`badge ${soal.tipe === 'pg' ? 'badge-primary' : 'badge-secondary'} text-sm`} style={{ marginLeft: '8px' }}>
+                          {soal.tipe === 'pg' ? 'Pilgan' : 'Esai'}
+                        </span>
+                      </p>
 
-                {mengerjakan ? (
-                  <span className="text-sm text-muted">
-                    PG: {ringkas.pgBenar}/{ringkas.pgTotal} benar
-                    {ringkas.esaiMenunggu > 0 && ` · ${ringkas.esaiMenunggu} esai perlu dikoreksi`}
-                    {ringkas.rataRata != null && ` · Rata-rata: ${ringkas.rataRata.toFixed(1)}`}
-                    {(feedbackMap[siswa.id]?.umpan_balik || feedbackMap[siswa.id]?.file_url) && ' · 📝 ada feedback'}
-                  </span>
-                ) : (
-                  <span className="text-sm text-muted">belum mengerjakan</span>
-                )}
-
-                {mengerjakan && (
-                  <span className={`badge ${semuaFinal ? 'badge-success' : 'badge-warning'}`}>
-                    {semuaFinal ? 'FINAL' : 'PENDING'}
-                  </span>
-                )}
-
-                <span className="accordion-chevron">›</span>
-              </summary>
-
-              <div className="accordion-body">
-                {!mengerjakan ? (
-                  <p className="text-muted mb-0">Siswa ini belum mengumpulkan jawaban.</p>
-                ) : (
-                  <>
-                    {soalList.map((soal, idx) => {
-                      const j = jw[soal.id];
-                      const kunci = kunciMap[soal.id];
-                      const nilai = nilaiTersimpan(j);
-
-                      return (
-                        <div key={soal.id} className="mb-3" style={{ border: '1px solid var(--slate-200)', borderRadius: 'var(--radius-md)', padding: '0.9rem' }}>
-                          <p className="mb-1">
-                            <strong>Soal {idx + 1}</strong>
-                            <span className={`badge ${soal.tipe === 'pg' ? 'badge-primary' : 'badge-secondary'} text-sm`} style={{ marginLeft: '8px' }}>
-                              {soal.tipe === 'pg' ? 'Pilgan' : 'Esai'}
-                            </span>
-                          </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                        {/* KIRI — jawaban siswa */}
+                        <div>
                           <p style={{ whiteSpace: 'pre-wrap' }}>{soal.pertanyaan}</p>
-
                           {!j ? (
                             <p className="text-muted mb-0">Tidak dijawab.</p>
                           ) : (
@@ -403,113 +453,109 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
                                 <strong>Jawaban siswa:</strong>{' '}
                                 <span style={{ whiteSpace: 'pre-wrap' }}>{formatJawaban(j.jawaban_teks)}</span>
                               </p>
-
-                              {soal.tipe === 'pg' && (
-                                <>
-                                  <p className="mb-1 text-sm">
-                                    <strong>Kunci:</strong>{' '}
-                                    {kunci ? formatJawaban(kunci) : <em className="text-muted">belum diatur</em>}
-                                  </p>
-                                  <p className="mb-1">
-                                    {j.skor_ai == null ? (
-                                      <span className="badge badge-warning">Perlu dikoreksi manual</span>
-                                    ) : Number(j.skor_ai) === 100 ? (
-                                      <span className="badge badge-success">✔ Benar</span>
-                                    ) : (
-                                      <span className="badge badge-danger">✘ Salah</span>
-                                    )}
-                                  </p>
-                                </>
+                              {kunci && (
+                                <p className="mb-1 text-sm">
+                                  <strong>Kunci/rubrik:</strong>{' '}
+                                  <span style={{ whiteSpace: 'pre-wrap' }}>{formatJawaban(kunci)}</span>
+                                </p>
                               )}
-
-                              {soal.tipe === 'uraian' && (
-                                <>
-                                  {kunci && (
-                                    <p className="mb-1 text-sm">
-                                      <strong>Kunci/rubrik:</strong>{' '}
-                                      <span style={{ whiteSpace: 'pre-wrap' }}>{kunci}</span>
-                                    </p>
-                                  )}
-                                  {j.feedback_ai && (
-                                    <p className="mb-1 text-sm">
-                                      <span className="badge badge-primary">Skor AI: {j.skor_ai ?? '-'}</span>{' '}
-                                      {/* Teks dari AI dirender sebagai teks biasa, bukan HTML. */}
-                                      <span style={{ whiteSpace: 'pre-wrap' }}>{j.feedback_ai}</span>
-                                    </p>
-                                  )}
-                                </>
+                              {soal.tipe === 'uraian' && j.feedback_ai && (
+                                <p className="mb-1 text-sm">
+                                  <span className="badge badge-primary">Skor AI: {j.skor_ai ?? '-'}</span>{' '}
+                                  <span style={{ whiteSpace: 'pre-wrap' }}>{j.feedback_ai}</span>
+                                </p>
                               )}
-
                               {j.foto_url && (
-                                <p className="mb-1">
+                                <p className="mb-0">
                                   <a href={fileUrl(j.foto_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat Bukti Jawaban</a>
                                 </p>
                               )}
-
-                              <div className="d-flex align-center gap-2 mt-2">
-                                <label className="mb-0"><strong>Nilai final:</strong></label>
-                                <input
-                                  type="number"
-                                  className="form-control"
-                                  style={{ maxWidth: '110px' }}
-                                  min="0"
-                                  max="100"
-                                  value={nilaiEdit[j.id] ?? (nilai != null ? String(nilai) : '')}
-                                  onChange={e => setNilaiEdit(prev => ({ ...prev, [j.id]: e.target.value }))}
-                                />
-                                {j.status === 'final' && <span className="badge badge-success">Sudah divalidasi</span>}
-                              </div>
                             </>
                           )}
                         </div>
-                      );
-                    })}
 
-                    <div style={{ border: '1px solid var(--slate-200)', borderRadius: 'var(--radius-md)', padding: '0.9rem', marginTop: '0.9rem' }}>
-                      <p className="mb-2"><strong>Feedback Guru</strong> <small className="text-muted">(tulisan + file perbaikan, terlihat oleh siswa)</small></p>
-                      <textarea
-                        className="form-control mb-2"
-                        rows={2}
-                        placeholder="Catatan / perbaikan untuk siswa..."
-                        value={feedbackMap[siswa.id]?.umpan_balik || ''}
-                        onChange={e => setFeedbackMap(prev => ({ ...prev, [siswa.id]: { ...prev[siswa.id], umpan_balik: e.target.value } }))}
-                      />
-                      {feedbackMap[siswa.id]?.file_url && (
-                        <div className="mb-2">
-                          <a href={fileUrl(feedbackMap[siswa.id].file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat File Perbaikan</a>
+                        {/* KANAN — panel penilaian guru */}
+                        <div>
+                          <p className="mb-1 text-sm text-muted">Periksa hasil deteksi AI, tandai benar/salah, koreksi skor bila perlu.</p>
+                          <div className="d-flex gap-2 mb-2">
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${dianggapBenar ? 'btn-success' : 'btn-outline'}`}
+                              disabled={!j}
+                              onClick={() => j && toggleBenarSalah(j.id, true)}
+                            >
+                              ✔ Benar
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${skor != null && !dianggapBenar ? 'btn-danger' : 'btn-outline'}`}
+                              disabled={!j}
+                              onClick={() => j && toggleBenarSalah(j.id, false)}
+                            >
+                              ✘ Salah
+                            </button>
+                          </div>
+                          <label className="mb-0 text-sm"><strong>Skor final:</strong></label>
+                          <input
+                            type="number"
+                            className="form-control"
+                            style={{ maxWidth: '110px' }}
+                            min={0}
+                            max={100}
+                            disabled={!j}
+                            value={nilaiEdit[j?.id ?? ''] ?? (skor != null ? String(skor) : '')}
+                            onChange={(e) => j && setNilaiEdit((prev) => ({ ...prev, [j.id]: e.target.value }))}
+                          />
                         </div>
-                      )}
-                      <input
-                        type="file"
-                        className="form-control mb-2"
-                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-                        onChange={e => setFeedbackPendingFile(prev => ({ ...prev, [siswa.id]: e.target.files?.[0] || null }))}
-                      />
-                      <input
-                        type="url"
-                        className="form-control mb-2"
-                        placeholder="atau link Google Drive (file besar)"
-                        value={feedbackLink[siswa.id] || ''}
-                        onChange={e => setFeedbackLink(prev => ({ ...prev, [siswa.id]: e.target.value }))}
-                      />
-                      <button className="btn btn-sm btn-primary" onClick={() => simpanFeedback(siswa.id)}>Simpan Feedback</button>
+                      </div>
                     </div>
-
-                    <div style={{ textAlign: 'right' }}>
-                      <button
-                        className="btn btn-success"
-                        onClick={() => validasi([siswa.id])}
-                        disabled={saving}
-                      >
-                        Validasi Siswa Ini
-                      </button>
-                    </div>
-                  </>
-                )}
+                  );
+                })}
               </div>
-            </details>
-          );
-        })
+
+              <div className="d-flex justify-between mt-3">
+                <button type="button" className="btn btn-secondary" onClick={() => setPenilaianSiswa(null)}>Tutup</button>
+                <button type="button" className="btn btn-success" onClick={() => validasi([penilaianSiswa.id])} disabled={saving}>
+                  {saving ? 'Menyimpan...' : 'Simpan Penilaian Siswa Ini'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal FEEDBACK */}
+      {fbSiswa && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ maxWidth: '560px' }}>
+            <div className="modal-header">
+              <h3>Feedback — {fbSiswa.nama}</h3>
+              <button type="button" className="btn-close-modal" onClick={() => setFbSiswa(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Umpan Balik</label>
+                <textarea className="form-control" rows={4} value={fbText} onChange={(e) => setFbText(e.target.value)} placeholder="Catatan / perbaikan untuk siswa..." />
+              </div>
+              <div className="form-group">
+                <label>File Perbaikan (opsional)</label>
+                {feedbackMap[fbSiswa.id]?.file_url && (
+                  <div className="mb-2">
+                    <a href={fileUrl(feedbackMap[fbSiswa.id].file_url)!} target="_blank" rel="noopener noreferrer" className="text-primary">📎 Lihat File Perbaikan</a>
+                  </div>
+                )}
+                <input type="file" className="form-control mb-2" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={(e) => setFbFile(e.target.files?.[0] || null)} />
+                <input type="url" className="form-control" placeholder="atau link Google Drive (file besar)" value={fbLink} onChange={(e) => setFbLink(e.target.value)} />
+              </div>
+              <div className="d-flex justify-between mt-3">
+                <button type="button" className="btn btn-secondary" onClick={() => setFbSiswa(null)}>Batal</button>
+                <button type="button" className="btn btn-primary" onClick={simpanFeedback} disabled={savingFb}>
+                  {savingFb ? 'Menyimpan...' : 'Simpan Feedback'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

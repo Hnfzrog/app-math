@@ -148,6 +148,33 @@ input, select, textarea {
 .btn-icon:hover { background: var(--slate-200); color: var(--slate-800); }
 .btn-text-sm { font-size: 12px; color: var(--primary); font-weight: 600; }
 
+/* Tombol/element non-aktif: jelas terlihat non-aktif + kursor not-allowed,
+   dan TIDAK ikut efek hover (sebelumnya `disabled` tampak sama sekali seperti aktif). */
+.btn:disabled,
+.btn[disabled],
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+.btn:disabled:hover,
+.btn[disabled]:hover,
+button:disabled:hover {
+  transform: none;
+}
+.btn-primary:disabled:hover { background: var(--primary); }
+.btn-secondary:disabled:hover { background: var(--slate-200); }
+.btn-success:disabled:hover { background: var(--success); }
+.btn-danger:disabled:hover { background: var(--danger); }
+.btn-outline:disabled:hover { background: var(--white); border-color: var(--slate-300); }
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--slate-100);
+}
+
 /* Badges */
 .badge {
   display: inline-flex;
@@ -169,7 +196,10 @@ input, select, textarea {
 .form-group {
   margin-bottom: 1.1rem;
 }
-.form-group label {
+/* :where() = spesifisitas 0, agar utility (.d-flex, .gap-*, .mb-*) bisa menimpanya.
+   Tanpa ini, `.form-group label` (0,1,1) menang atas `.d-flex` (0,1,0) dan
+   membuat label ber-flex tidak berfungsi (elemen berdempetan). */
+:where(.form-group) label {
   display: block;
   font-weight: 600;
   margin-bottom: 0.4rem;
@@ -410,6 +440,12 @@ input, select, textarea {
   background: rgba(15, 23, 42, 0.6);
   z-index: 90;
 }
+
+/* Mode ujian: sembunyikan navigasi. Kelas di <body> (bukan inline style) agar
+   restore andal — inline style pada node yang di-render React bisa bocor/tertimpa re-render. */
+body.exam-mode .sidebar,
+body.exam-mode .topbar { display: none !important; }
+body.exam-mode .main-content-wrapper { margin-left: 0; }
 
 /* TOPBAR & MAIN CONTENT WRAPPER */
 .main-content-wrapper {

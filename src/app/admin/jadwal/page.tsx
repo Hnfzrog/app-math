@@ -62,10 +62,10 @@ export default function AdminJadwal() {
     }
     
     setLoading(false);
-    checkConflicts(jadwalRes.data || []);
+    checkConflicts(jadwalRes.data || [], guruRes.data || [], kelasRes.data || []);
   };
 
-  const checkConflicts = (jadwalData: any[]) => {
+  const checkConflicts = (jadwalData: any[], guruData: any[], kelasData: any[]) => {
     // Deteksi bentrok: (1) guru ngajar >1 kelas pada waktu sama, (2) kelas diisi >1 guru pada waktu sama
     const guruMap: Record<string, string[]> = {};
     const kelasMap: Record<string, string[]> = {};
@@ -84,16 +84,16 @@ export default function AdminJadwal() {
     Object.keys(guruMap).forEach(key => {
       if (guruMap[key].length > 1) {
         const [guruId, hari, slot] = key.split('_');
-        const guru = gurus.find(g => g.id === guruId)?.nama;
-        newConflicts.push(`Konflik Guru: ${guru || guruId} mengajar ${guruMap[key].length} kelas pada ${hari} pukul ${slot}`);
+        const guru = guruData.find(g => g.id === guruId)?.nama;
+        newConflicts.push(`Konflik Guru: ${guru || 'Guru tak dikenal'} mengajar ${guruMap[key].length} kelas pada ${hari} pukul ${slot}`);
       }
     });
 
     Object.keys(kelasMap).forEach(key => {
       if (kelasMap[key].length > 1) {
         const [kelasId, hari, slot] = key.split('_');
-        const kelasName = kelas.find(k => k.id === kelasId)?.nama;
-        newConflicts.push(`Konflik Kelas: ${kelasName || kelasId} diisi ${kelasMap[key].length} guru pada ${hari} pukul ${slot}`);
+        const kelasName = kelasData.find(k => k.id === kelasId)?.nama;
+        newConflicts.push(`Konflik Kelas: ${kelasName || 'Kelas tak dikenal'} diisi ${kelasMap[key].length} guru pada ${hari} pukul ${slot}`);
       }
     });
 
@@ -201,8 +201,8 @@ export default function AdminJadwal() {
       }
 
       if (!placed) {
-        const guruName = gurus.find(g => g.id === mapping.guru_id)?.nama || mapping.guru_id;
-        const kelasName = kelas.find(k => k.id === mapping.kelas_id)?.nama || mapping.kelas_id;
+        const guruName = gurus.find(g => g.id === mapping.guru_id)?.nama || 'Guru tak dikenal';
+        const kelasName = kelas.find(k => k.id === mapping.kelas_id)?.nama || 'Kelas tak dikenal';
         unassigned.push(`${guruName} → ${kelasName}`);
       }
     }

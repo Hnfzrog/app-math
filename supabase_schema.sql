@@ -278,12 +278,27 @@ INSERT INTO public.pengaturan (id, nama_sekolah, alamat, kop_surat, latitude_pus
 VALUES ('00000000-0000-0000-0000-000000000010', 'SMP Matematika', 'Jl. Contoh No. 1', 'SMP Matematika', NULL, NULL, 50)
 ON CONFLICT (id) DO NOTHING;
 
--- 22. NILAI: enforce nilai_akhir derived in DB — formula (skor_benar * 0.9) + (skor_presensi * 0.1)
+-- 22. NILAI: komponen per bab + rata-rata (revisi 6 Okt 2026)
+-- nilai_akhir = rata-rata SEDERHANA komponen yang terisi (LKPD/Tugas/UH/Keaktifan).
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS nilai_lkpd numeric;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS nilai_tugas numeric;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS nilai_uh numeric;
+ALTER TABLE public.nilai ADD COLUMN IF NOT EXISTS nilai_keaktifan numeric;
+
 CREATE OR REPLACE FUNCTION public.set_nilai_akhir()
 RETURNS trigger AS $$
+DECLARE
+  jumlah numeric;
+  n integer;
 BEGIN
-  IF NEW.skor_benar IS NOT NULL OR NEW.skor_presensi IS NOT NULL THEN
-    NEW.nilai_akhir := (COALESCE(NEW.skor_benar, 0) * 0.9) + (COALESCE(NEW.skor_presensi, 0) * 0.1);
+  n := (NEW.nilai_lkpd IS NOT NULL)::int
+     + (NEW.nilai_tugas IS NOT NULL)::int
+     + (NEW.nilai_uh IS NOT NULL)::int
+     + (NEW.nilai_keaktifan IS NOT NULL)::int;
+  IF n > 0 THEN
+    jumlah := COALESCE(NEW.nilai_lkpd, 0) + COALESCE(NEW.nilai_tugas, 0)
+            + COALESCE(NEW.nilai_uh, 0) + COALESCE(NEW.nilai_keaktifan, 0);
+    NEW.nilai_akhir := jumlah / n;
   ELSE
     NEW.nilai_akhir := NULL;
   END IF;
@@ -387,19 +402,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 DROP TRIGGER IF EXISTS trg_notif_konten ON public.konten;
 CREATE TRIGGER trg_notif_konten AFTER INSERT ON public.konten FOR EACH ROW EXECUTE FUNCTION public.notif_konten_baru();
 
--- 30b. Ujian baru → notif ke siswa sekelas
-CREATE OR REPLACE FUNCTION public.notif_ujian_baru()
-RETURNS trigger AS $$
-BEGIN
-  INSERT INTO public.notifikasi (user_id, pesan)
-  SELECT sk.siswa_id, 'Ujian baru (' || NEW.jenis || ') untuk kelas Anda.'
-  FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
+-- 30b. (DIHAPUS) Notif "ujian baru" saat INSERT digantikan oleh trg_notif_ujian_terbit_*
+-- — notifikasi hanya dikirim saat ujian DITERBITKAN, bukan saat dibuat.
+-- Konsisten dengan supabase_v2_migration.sql (yang menghapus trigger ini).
 DROP TRIGGER IF EXISTS trg_notif_ujian ON public.ujian;
-CREATE TRIGGER trg_notif_ujian AFTER INSERT ON public.ujian FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_baru();
+DROP FUNCTION IF EXISTS public.notif_ujian_baru();
 
 -- 30c. Nilai baru → notif ke siswa
 CREATE OR REPLACE FUNCTION public.notif_nilai_baru()
@@ -591,4 +598,350 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS trg_notif_ujian_feedback ON public.ujian_feedback;
 CREATE TRIGGER trg_notif_ujian_feedback AFTER INSERT OR UPDATE ON public.ujian_feedback FOR EACH ROW EXECUTE FUNCTION public.notif_ujian_feedback();
+
+-- 39. REMEDIAL: tugas/UH khusus siswa dengan rata-rata bab < 75 (revisi 6 Okt 2026)
+ALTER TABLE public.konten ADD COLUMN IF NOT EXISTS is_remedial boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS is_remedial boolean NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS public.remedial_target (
+  id uuid default uuid_generate_v4() primary key,
+  item_type text not null check (item_type in ('konten','ujian')),
+  item_id uuid not null,
+  siswa_id uuid references public.users on delete cascade not null,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (item_type, item_id, siswa_id)
+);
+ALTER TABLE public.remedial_target ENABLE ROW LEVEL SECURITY;
+
+-- RLS remedial_target (pakai inline EXISTS agar file schema tetap mandiri)
+DROP POLICY IF EXISTS "remedial_target read" ON public.remedial_target;
+CREATE POLICY "remedial_target read" ON public.remedial_target FOR SELECT TO authenticated
+  USING (
+    siswa_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role IN ('admin','guru'))
+  );
+DROP POLICY IF EXISTS "admin full remedial_target" ON public.remedial_target;
+CREATE POLICY "admin full remedial_target" ON public.remedial_target FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru manage remedial_target" ON public.remedial_target;
+CREATE POLICY "guru manage remedial_target" ON public.remedial_target FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'guru'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'guru'));
+
+-- 40. PENGUMUMAN admin/guru (revisi 6 Okt 2026)
+CREATE TABLE IF NOT EXISTS public.pengumuman (
+  id uuid default uuid_generate_v4() primary key,
+  author_id uuid references public.users on delete cascade not null,
+  author_role text not null check (author_role in ('admin','guru')),
+  judul text not null,
+  deskripsi text not null,
+  tayang_sampai timestamptz not null,
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+ALTER TABLE public.pengumuman ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.pengumuman_target (
+  id uuid default uuid_generate_v4() primary key,
+  pengumuman_id uuid references public.pengumuman on delete cascade not null,
+  role text check (role in ('semua','guru','siswa')),
+  kelas_id uuid references public.kelas on delete cascade,
+  user_id uuid references public.users on delete cascade
+);
+ALTER TABLE public.pengumuman_target ENABLE ROW LEVEL SECURITY;
+
+-- 41. PELANGGARAN UJIAN — mode ujian (revisi 6 Okt 2026)
+CREATE TABLE IF NOT EXISTS public.pelanggaran_ujian (
+  id uuid default uuid_generate_v4() primary key,
+  ujian_id uuid references public.ujian on delete cascade not null,
+  siswa_id uuid references public.users on delete cascade not null,
+  jenis text not null check (jenis in ('pindah_tab','keluar_halaman','keluar_fullscreen')),
+  durasi_detik integer,
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+ALTER TABLE public.pelanggaran_ujian ENABLE ROW LEVEL SECURITY;
+
+-- 42. PEMBAHASAN tugas/ujian (revisi 6 Okt 2026)
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS pembahasan_file_url text;
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS pembahasan_terbit_at timestamptz;
+ALTER TABLE public.ujian ADD COLUMN IF NOT EXISTS pembahasan_is_terbit boolean NOT NULL DEFAULT false;
+ALTER TABLE public.konten ADD COLUMN IF NOT EXISTS pembahasan_file_url text;
+ALTER TABLE public.konten ADD COLUMN IF NOT EXISTS pembahasan_terbit_at timestamptz;
+ALTER TABLE public.konten ADD COLUMN IF NOT EXISTS pembahasan_is_terbit boolean NOT NULL DEFAULT false;
+
+-- RLS pengumuman (inline EXISTS agar file schema tetap mandiri)
+DROP POLICY IF EXISTS "pengumuman read" ON public.pengumuman;
+CREATE POLICY "pengumuman read" ON public.pengumuman FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "admin full pengumuman" ON public.pengumuman;
+CREATE POLICY "admin full pengumuman" ON public.pengumuman FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru insert pengumuman" ON public.pengumuman;
+CREATE POLICY "guru insert pengumuman" ON public.pengumuman FOR INSERT TO authenticated
+  WITH CHECK (author_id = auth.uid() AND EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'guru'));
+DROP POLICY IF EXISTS "guru delete own pengumuman" ON public.pengumuman;
+CREATE POLICY "guru delete own pengumuman" ON public.pengumuman FOR DELETE TO authenticated
+  USING (author_id = auth.uid() AND EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'guru'));
+
+-- 45. NILAI PER ITEM (Opsi B): skor tiap tugas/LKPD/UH; komponen bab = rata-rata item.
+CREATE TABLE IF NOT EXISTS public.nilai_item (
+  id uuid default uuid_generate_v4() primary key,
+  siswa_id uuid references public.users on delete cascade not null,
+  item_type text not null check (item_type in ('konten','ujian')),
+  item_id uuid not null,
+  skor numeric,
+  dinilai_at timestamptz,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (siswa_id, item_type, item_id)
+);
+ALTER TABLE public.nilai_item ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.recompute_nilai_komponen()
+RETURNS trigger AS $$
+DECLARE
+  v_siswa uuid := COALESCE(NEW.siswa_id, OLD.siswa_id);
+  v_item uuid := COALESCE(NEW.item_id, OLD.item_id);
+  v_type text := COALESCE(NEW.item_type, OLD.item_type);
+  v_bab uuid;
+  v_komponen text;
+  v_avg numeric;
+BEGIN
+  IF v_type = 'konten' THEN
+    SELECT bab_id, CASE WHEN tipe = 'lkpd' THEN 'lkpd' ELSE 'tugas' END
+      INTO v_bab, v_komponen FROM public.konten WHERE id = v_item;
+  ELSIF v_type = 'ujian' THEN
+    SELECT bab_id, 'uh' INTO v_bab, v_komponen FROM public.ujian WHERE id = v_item;
+  END IF;
+  IF v_bab IS NULL THEN RETURN COALESCE(NEW, OLD); END IF;
+
+  IF v_komponen = 'lkpd' THEN
+    SELECT avg(ni.skor) INTO v_avg FROM public.nilai_item ni
+      JOIN public.konten k ON k.id = ni.item_id
+      WHERE ni.siswa_id = v_siswa AND ni.item_type = 'konten' AND k.bab_id = v_bab AND k.tipe = 'lkpd' AND ni.skor IS NOT NULL;
+  ELSIF v_komponen = 'tugas' THEN
+    SELECT avg(ni.skor) INTO v_avg FROM public.nilai_item ni
+      JOIN public.konten k ON k.id = ni.item_id
+      WHERE ni.siswa_id = v_siswa AND ni.item_type = 'konten' AND k.bab_id = v_bab AND k.tipe IN ('banksoal','evaluasi') AND ni.skor IS NOT NULL;
+  ELSE
+    SELECT avg(ni.skor) INTO v_avg FROM public.nilai_item ni
+      JOIN public.ujian u ON u.id = ni.item_id
+      WHERE ni.siswa_id = v_siswa AND ni.item_type = 'ujian' AND u.bab_id = v_bab AND u.jenis = 'UH' AND ni.skor IS NOT NULL;
+  END IF;
+
+  INSERT INTO public.nilai (siswa_id, bab_id) VALUES (v_siswa, v_bab) ON CONFLICT (siswa_id, bab_id) DO NOTHING;
+  UPDATE public.nilai SET
+    nilai_lkpd  = CASE WHEN v_komponen = 'lkpd'  THEN v_avg ELSE nilai_lkpd  END,
+    nilai_tugas = CASE WHEN v_komponen = 'tugas' THEN v_avg ELSE nilai_tugas END,
+    nilai_uh    = CASE WHEN v_komponen = 'uh'    THEN v_avg ELSE nilai_uh    END
+  WHERE siswa_id = v_siswa AND bab_id = v_bab;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_recompute_nilai_item ON public.nilai_item;
+CREATE TRIGGER trg_recompute_nilai_item AFTER INSERT OR UPDATE OR DELETE ON public.nilai_item FOR EACH ROW EXECUTE FUNCTION public.recompute_nilai_komponen();
+
+DROP POLICY IF EXISTS "nilai_item read own" ON public.nilai_item;
+CREATE POLICY "nilai_item read own" ON public.nilai_item FOR SELECT TO authenticated USING (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "admin full nilai_item" ON public.nilai_item;
+CREATE POLICY "admin full nilai_item" ON public.nilai_item FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru manage nilai_item" ON public.nilai_item;
+CREATE POLICY "guru manage nilai_item" ON public.nilai_item FOR ALL TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = (
+      CASE WHEN nilai_item.item_type = 'konten'
+        THEN (SELECT b.kelas_id FROM public.konten k JOIN public.bab b ON b.id = k.bab_id WHERE k.id = nilai_item.item_id)
+        ELSE (SELECT u.kelas_id FROM public.ujian u WHERE u.id = nilai_item.item_id) END)
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = (
+      CASE WHEN nilai_item.item_type = 'konten'
+        THEN (SELECT b.kelas_id FROM public.konten k JOIN public.bab b ON b.id = k.bab_id WHERE k.id = nilai_item.item_id)
+        ELSE (SELECT u.kelas_id FROM public.ujian u WHERE u.id = nilai_item.item_id) END)
+  ));
+
+DROP POLICY IF EXISTS "pengumuman_target read" ON public.pengumuman_target;
+CREATE POLICY "pengumuman_target read" ON public.pengumuman_target FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "admin full pengumuman_target" ON public.pengumuman_target;
+CREATE POLICY "admin full pengumuman_target" ON public.pengumuman_target FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru manage pengumuman_target" ON public.pengumuman_target;
+CREATE POLICY "guru manage pengumuman_target" ON public.pengumuman_target FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.pengumuman p WHERE p.id = pengumuman_target.pengumuman_id AND p.author_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.pengumuman p WHERE p.id = pengumuman_target.pengumuman_id AND p.author_id = auth.uid()));
+
+-- RLS pelanggaran_ujian
+DROP POLICY IF EXISTS "siswa insert own pelanggaran" ON public.pelanggaran_ujian;
+CREATE POLICY "siswa insert own pelanggaran" ON public.pelanggaran_ujian FOR INSERT TO authenticated WITH CHECK (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "siswa read own pelanggaran" ON public.pelanggaran_ujian;
+CREATE POLICY "siswa read own pelanggaran" ON public.pelanggaran_ujian FOR SELECT TO authenticated USING (siswa_id = auth.uid());
+DROP POLICY IF EXISTS "admin full pelanggaran" ON public.pelanggaran_ujian;
+CREATE POLICY "admin full pelanggaran" ON public.pelanggaran_ujian FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru read pelanggaran kelasnya" ON public.pelanggaran_ujian;
+CREATE POLICY "guru read pelanggaran kelasnya" ON public.pelanggaran_ujian FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.ujian uj JOIN public.guru_kelas gk ON gk.kelas_id = uj.kelas_id
+    WHERE uj.id = pelanggaran_ujian.ujian_id AND gk.guru_id = auth.uid()
+  ));
+
+-- 43. NOTIFIKASI pengumuman → penerima (SECURITY DEFINER)
+CREATE OR REPLACE FUNCTION public.notif_pengumuman()
+RETURNS trigger AS $$
+DECLARE
+  p text;
+BEGIN
+  SELECT judul INTO p FROM public.pengumuman WHERE id = NEW.pengumuman_id;
+  IF NEW.user_id IS NOT NULL THEN
+    INSERT INTO public.notifikasi (user_id, pesan) VALUES (NEW.user_id, 'Pengumuman: ' || COALESCE(p, ''));
+  ELSIF NEW.kelas_id IS NOT NULL THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id, 'Pengumuman: ' || COALESCE(p, '') FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  ELSIF NEW.role = 'semua' THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT u.id, 'Pengumuman: ' || COALESCE(p, '') FROM public.users u WHERE u.role IN ('guru', 'siswa');
+  ELSIF NEW.role IS NOT NULL THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT u.id, 'Pengumuman: ' || COALESCE(p, '') FROM public.users u WHERE u.role = NEW.role;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_pengumuman ON public.pengumuman_target;
+CREATE TRIGGER trg_notif_pengumuman AFTER INSERT ON public.pengumuman_target FOR EACH ROW EXECUTE FUNCTION public.notif_pengumuman();
+
+-- 44. Pembahasan ujian terbit otomatis 1 menit setelah SEMUA siswa kelas mengumpulkan.
+-- CATATAN: trigger jalan di `jawaban_ujian` (tidak punya ujian_id) — diturunkan dari soal_id.
+CREATE OR REPLACE FUNCTION public.auto_terbit_pembahasan_ujian()
+RETURNS trigger AS $$
+DECLARE
+  v_ujian_id uuid;
+  v_kelas_id uuid;
+  total_siswa int;
+  sudah int;
+BEGIN
+  SELECT su.ujian_id INTO v_ujian_id FROM public.soal_ujian su WHERE su.id = NEW.soal_id;
+  IF v_ujian_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT kelas_id INTO v_kelas_id FROM public.ujian WHERE id = v_ujian_id;
+  SELECT count(*) INTO total_siswa FROM public.siswa_kelas sk WHERE sk.kelas_id = v_kelas_id;
+
+  SELECT count(DISTINCT j.siswa_id) INTO sudah
+  FROM public.jawaban_ujian j
+  JOIN public.soal_ujian s ON s.id = j.soal_id
+  WHERE s.ujian_id = v_ujian_id;
+
+  IF total_siswa > 0 AND sudah >= total_siswa THEN
+    UPDATE public.ujian
+      SET pembahasan_terbit_at = COALESCE(pembahasan_terbit_at, timezone('utc', now()) + interval '1 minute')
+      WHERE id = v_ujian_id AND pembahasan_file_url IS NOT NULL AND pembahasan_terbit_at IS NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_auto_terbit_pembahasan ON public.jawaban_ujian;
+CREATE TRIGGER trg_auto_terbit_pembahasan AFTER INSERT ON public.jawaban_ujian FOR EACH ROW EXECUTE FUNCTION public.auto_terbit_pembahasan_ujian();
+
+-- ==========================================
+-- 46. RAPOR (cetak & perangkingan) — 7 Okt 2026
+-- ==========================================
+
+-- bab.semester: menandai semester tiap bab (nilai mewarisi semester lewat bab).
+ALTER TABLE public.bab ADD COLUMN IF NOT EXISTS semester text NOT NULL DEFAULT 'ganjil'
+  CHECK (semester IN ('ganjil','genap'));
+
+-- pengaturan.kkm: ambang ketuntasan untuk kolom KKM rapor.
+ALTER TABLE public.pengaturan ADD COLUMN IF NOT EXISTS kkm numeric NOT NULL DEFAULT 75;
+
+CREATE TABLE IF NOT EXISTS public.rapor (
+  id uuid default uuid_generate_v4() primary key,
+  kelas_id uuid references public.kelas on delete cascade not null,
+  semester text not null check (semester in ('ganjil','genap')),
+  tahun_ajaran text,
+  is_terbit boolean not null default false,
+  terbit_at timestamptz,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (kelas_id, semester)
+);
+ALTER TABLE public.rapor ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.rapor_siswa (
+  id uuid default uuid_generate_v4() primary key,
+  rapor_id uuid references public.rapor on delete cascade not null,
+  siswa_id uuid references public.users on delete cascade not null,
+  kegiatan_pengembangan jsonb,
+  akhlak_kepribadian jsonb,
+  catatan_wali_kelas text,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  updated_at timestamptz,
+  unique (rapor_id, siswa_id)
+);
+ALTER TABLE public.rapor_siswa ENABLE ROW LEVEL SECURITY;
+
+-- RLS rapor (inline EXISTS agar file schema tetap mandiri)
+DROP POLICY IF EXISTS "rapor read" ON public.rapor;
+CREATE POLICY "rapor read" ON public.rapor FOR SELECT TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
+    OR EXISTS (SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = rapor.kelas_id)
+    OR (rapor.is_terbit AND EXISTS (
+      SELECT 1 FROM public.siswa_kelas sk WHERE sk.kelas_id = rapor.kelas_id AND sk.siswa_id = auth.uid()
+    ))
+  );
+DROP POLICY IF EXISTS "admin full rapor" ON public.rapor;
+CREATE POLICY "admin full rapor" ON public.rapor FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru manage rapor" ON public.rapor;
+CREATE POLICY "guru manage rapor" ON public.rapor FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = rapor.kelas_id))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.guru_kelas gk WHERE gk.guru_id = auth.uid() AND gk.kelas_id = rapor.kelas_id));
+
+-- RLS rapor_siswa (inline)
+DROP POLICY IF EXISTS "rapor_siswa read" ON public.rapor_siswa;
+CREATE POLICY "rapor_siswa read" ON public.rapor_siswa FOR SELECT TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
+    OR EXISTS (SELECT 1 FROM public.rapor r JOIN public.guru_kelas gk ON gk.kelas_id = r.kelas_id
+               WHERE r.id = rapor_siswa.rapor_id AND gk.guru_id = auth.uid())
+    OR (
+      rapor_siswa.siswa_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.rapor r WHERE r.id = rapor_siswa.rapor_id AND r.is_terbit)
+    )
+  );
+DROP POLICY IF EXISTS "admin full rapor_siswa" ON public.rapor_siswa;
+CREATE POLICY "admin full rapor_siswa" ON public.rapor_siswa FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'));
+DROP POLICY IF EXISTS "guru manage rapor_siswa" ON public.rapor_siswa;
+CREATE POLICY "guru manage rapor_siswa" ON public.rapor_siswa FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.rapor r JOIN public.guru_kelas gk ON gk.kelas_id = r.kelas_id
+                 WHERE r.id = rapor_siswa.rapor_id AND gk.guru_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.rapor r JOIN public.guru_kelas gk ON gk.kelas_id = r.kelas_id
+                 WHERE r.id = rapor_siswa.rapor_id AND gk.guru_id = auth.uid()));
+
+-- Notifikasi ke siswa saat rapor kelasnya diterbitkan (SECURITY DEFINER).
+CREATE OR REPLACE FUNCTION public.notif_rapor_terbit()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_terbit AND OLD.is_terbit IS DISTINCT FROM true THEN
+    INSERT INTO public.notifikasi (user_id, pesan)
+    SELECT sk.siswa_id,
+           'Rapor semester ' || CASE WHEN NEW.semester = 'genap' THEN 'Genap' ELSE 'Ganjil' END || ' kelasmu sudah diterbitkan. Kamu bisa mengunduhnya di Nilai Saya.'
+    FROM public.siswa_kelas sk WHERE sk.kelas_id = NEW.kelas_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_notif_rapor_terbit ON public.rapor;
+CREATE TRIGGER trg_notif_rapor_terbit AFTER UPDATE ON public.rapor FOR EACH ROW EXECUTE FUNCTION public.notif_rapor_terbit();
 

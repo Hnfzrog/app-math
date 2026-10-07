@@ -127,3 +127,55 @@ Scope approved 28 Sep 2026.
 
 ### Assumption (to confirm)
 - School identity + presensi center coordinates live in the `pengaturan` table (editable by admin via UI).
+
+### Revisi & Tambahan Fitur (6 Okt 2026)
+
+Scope approved 6 Okt 2026 (sumber: `revisi-update.md`). Pelacakan eksekusi di `revisi-tracker.md` (root repo, di luar `docs/`).
+
+**Bug fix — Auth (logout mendadak & tombol tak respons)**
+1. Migrasi autentikasi ke `@supabase/ssr`; sesi & proteksi rute memakai cookie sesi yang sama; hapus cookie `user-role` manual.
+2. `getSession()` dengan retry untuk error sementara; redirect ke `/login` hanya bila sesi benar-benar tidak ada.
+3. Listener `onAuthStateChange` untuk token refresh & sign-out yang konsisten.
+4. Loading state / disabled tombol saat proses berjalan.
+5. Log redirect ke `/login` (rute + penyebab); jangan redirect permintaan prefetch `<Link>`.
+
+**Pengumuman & Notifikasi**
+- Admin & guru membuat pengumuman (judul + deskripsi + batas waktu tayang). Admin: guru / siswa / beberapa pengguna / semua. Guru: semua kelas / beberapa kelas / beberapa siswa. Muncul di dashboard audiens + masuk `notifikasi`; hilang otomatis saat batas waktu.
+
+**Ujian & Tugas**
+- Kartu daftar menampilkan jumlah soal + waktu buka/tutup + durasi.
+- Submit jawaban dipercepat (penilaian AI uraian diparalelkan).
+- Pembahasan (tugas & ujian): guru upload; terbit H+1 menit setelah semua siswa selesai atau sesuai jadwal; ada override manual.
+- Mode ujian (khusus ujian): fullscreen + deteksi pelanggaran (pindah tab / keluar halaman / keluar fullscreen) + catat durasi keluar.
+
+**Penilaian**
+- Menyeluruh: tetap (tabel per bab).
+- Per bab: pilih bab → daftar siswa dengan kolom Nilai LKPD / Nilai Tugas / Nilai UH / Keaktifan / Rata-rata (kolom menyesuaikan komponen tersedia). Rata-rata = rata-rata sederhana kolom terisi (keaktifan ikut 1 kolom). Tombol PENILAIAN (pilih komponen; kiri jawaban siswa / kanan panel guru; verifikasi & koreksi AI; murni pekerjaan siswa) & FEEDBACK. Keaktifan otomatis dari presensi + bisa diedit. Rata-rata ≥ 75 → lanjut bab; < 75 → remedial (guru buat tugas/UH remedial dibuka khusus daftar siswa eksplisit).
+- Ujian UTS/UAS: pilih jenis → daftar siswa + nilai → PENILAIAN per siswa (kiri jawaban / kanan panel, tandai benar/salah & koreksi AI, tampilkan jumlah benar/salah, submit per siswa).
+
+**Non-goal**: foto jawaban tetap DEFERRED; tidak ada perubahan rumus untuk ujian selain UH (UH masuk per-bab).
+
+### Rapor (cetak & perangkingan) — 7 Okt 2026
+
+Scope approved 7 Okt 2026. Rapor formal "Laporan Hasil Belajar Peserta Didik" mengikuti layout gambar, isinya per-bab Matematika.
+
+**Guru**
+1. **Rapor** (`/guru/rapor`) — pilih kelas + semester (ganjil/genap) → daftar siswa dengan rata-rata nilai. Per siswa ada modal **Isi Deskripsi** untuk Kegiatan Pengembangan Diri, Akhlak/Kepribadian, dan Catatan Wali Kelas (disimpan ke `rapor_siswa`).
+2. **Terbitkan Rapor** — menerbitkan sekali untuk seluruh kelas (`rapor.is_terbit`). Setelah terbit, guru bisa **unduh rapor tiap siswa** (PDF per siswa).
+3. **Perangkingan** (`/guru/rapor`) — tabel No / Nama / Rata-rata (mean `nilai_akhir` semua bab pada semester tsb) / Peringkat. Export PDF berkop surat.
+
+**Siswa**
+4. **Nilai Saya / Rapor** — tombol **Unduh Rapor** hanya aktif bila `rapor` kelas + semester siswa ber-`is_terbit = true`. Menggantikan e-Rapor lama (terbit otomatis saat semua bab selesai).
+
+**Aturan bisnis (otomatis)**
+- KKM dari `pengaturan.kkm` (default 75), diedit admin di halaman Pengaturan.
+- Angka → huruf: 90–100 A, 80–89 B, 70–79 C, <70 D.
+- Deskripsi capaian per bab dari band `nilai_akhir` (≥90 "sangat baik", 80–89 "baik", ≥KKM "mencapai KKTP", <KKM "perlu remedial", NULL "belum dinilai").
+- Ketidakhadiran (Sakit/Izin/Tanpa Keterangan) dihitung dari `presensi`, di-scope per semester (Ganjil = Juli–Desember, Genap = Januari–Juni).
+- Saat rapor diterbitkan, siswa sekelas mendapat notifikasi (`trg_notif_rapor_terbit`).
+
+**Non-goal**: multi mata pelajaran; foto/upload pada rapor.
+
+### Infrastruktur AI (koreksi esai) — 7 Okt 2026
+
+Provider koreksi esai bersifat **swappable via env `AI_PROVIDER`**: **Groq** (default; model `openai/gpt-oss-120b`, gratis) atau **Gemini** (alternatif). Soal **pilihan ganda tidak memakai AI** (dinilai di kode). Bila provider gagal atau kunci kosong, `/api/ujian/submit` tetap menyimpan jawaban (`skor_ai` null) dan guru menilai esai secara manual. Implementasi: `src/lib/aiScore.ts`.

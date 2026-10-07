@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "app-math",
+			"path": "."
+		},
+		{
+			"name": "sql_backup",
+			"path": "../../Downloads/sql_backup"
+		}
+	],
+	"settings": {}
+}

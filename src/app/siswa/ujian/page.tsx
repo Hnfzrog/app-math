@@ -9,6 +9,7 @@ export default function SiswaUjianList() {
   const [loading, setLoading] = useState(true);
   const [ujianList, setUjianList] = useState<any[]>([]);
   const [selesai, setSelesai] = useState<Set<string>>(new Set());
+  const [jumlahSoalMap, setJumlahSoalMap] = useState<Record<string, number>>({});
   const { userId, loading: userLoading } = useCurrentUser();
 
   useEffect(() => {
@@ -17,14 +18,15 @@ export default function SiswaUjianList() {
 
   const fetchUjian = async () => {
     setLoading(true);
-    // Cari kelas_id siswa
+    // Siswa bisa terdaftar di >1 kelas → ambil semua (dulu .single() gagal bila >1,
+    // membuat daftar ujian kosong/inkonsisten).
     const { data: siswaKelas } = await supabase
       .from('siswa_kelas')
       .select('kelas_id')
-      .eq('siswa_id', userId)
-      .single();
+      .eq('siswa_id', userId);
 
-    if (!siswaKelas) {
+    const kelasIds = (siswaKelas || []).map((k) => k.kelas_id);
+    if (kelasIds.length === 0) {
       setLoading(false);
       return;
     }
@@ -33,11 +35,18 @@ export default function SiswaUjianList() {
     const { data: ujianData } = await supabase
       .from('ujian')
       .select('*, users:guru_id(nama)')
-      .eq('kelas_id', siswaKelas.kelas_id)
+      .in('kelas_id', kelasIds)
       .eq('is_terbit', true)
       .order('mulai_at', { ascending: false });
 
-    const list = ujianData || [];
+    // Sembunyikan ujian remedial kecuali siswa terdaftar di remedial_target.
+    const { data: rt } = await supabase
+      .from('remedial_target')
+      .select('item_id')
+      .eq('item_type', 'ujian')
+      .eq('siswa_id', userId);
+    const remedialDiizinkan = new Set((rt || []).map((r) => r.item_id));
+    const list = (ujianData || []).filter((u) => !u.is_remedial || remedialDiizinkan.has(u.id));
     setUjianList(list);
 
     // Tandai ujian yang sudah dikerjakan supaya tombolnya jadi "Lihat Hasil"
@@ -46,6 +55,13 @@ export default function SiswaUjianList() {
         .from('soal_ujian')
         .select('id, ujian_id')
         .in('ujian_id', list.map((u: any) => u.id));
+
+      // Jumlah soal per ujian — ditampilkan di kartu daftar ujian.
+      const jumlahMap: Record<string, number> = {};
+      (soalU || []).forEach((s) => {
+        jumlahMap[s.ujian_id] = (jumlahMap[s.ujian_id] || 0) + 1;
+      });
+      setJumlahSoalMap(jumlahMap);
 
       const soalIds = (soalU || []).map((s: any) => s.id);
       if (soalIds.length > 0) {
@@ -114,7 +130,8 @@ export default function SiswaUjianList() {
                   <div className="exam-info-box" style={{ fontSize: '13px', marginBottom: '12px' }}>
                     <p style={{ margin: '0 0 4px' }}><strong>Dibuka:</strong> {formatJadwal(u.mulai_at)}</p>
                     <p style={{ margin: '0 0 4px' }}><strong>Ditutup:</strong> {formatJadwal(u.selesai_at)}</p>
-                    <p style={{ margin: 0 }}><strong>Durasi:</strong> {u.durasi_menit} menit</p>
+                    <p style={{ margin: '0 0 4px' }}><strong>Durasi:</strong> {u.durasi_menit} menit</p>
+                    <p style={{ margin: 0 }}><strong>Jumlah Soal:</strong> {jumlahSoalMap[u.id] ?? u.jumlah_soal ?? '-'}</p>
                   </div>
 
                   {bisaMulai || sudahSelesai ? (

@@ -5,6 +5,7 @@ import { customAlert } from '@/lib/customAlert';
 import PhotoUpload from '@/components/PhotoUpload';
 import { uploadFile, fileUrl } from '@/lib/uploadClient';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { judulBab } from '@/lib/judulBab';
 import Link from 'next/link';
 
 export default function GuruKelasDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -45,6 +46,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   
   const [showAddBabModal, setShowAddBabModal] = useState(false);
   const [newBabJudul, setNewBabJudul] = useState('');
+  const [newBabSemester, setNewBabSemester] = useState<'ganjil' | 'genap'>('ganjil');
   
   // State form kuis
   const [soalList, setSoalList] = useState<any[]>([]);
@@ -56,6 +58,9 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
   const [butuhUpload, setButuhUpload] = useState(false);
   const [lampiranFile, setLampiranFile] = useState<File | null>(null);
   const [lampiranLink, setLampiranLink] = useState('');
+  // Pembahasan tugas/LKPD (D3)
+  const [formPembahasanFile, setFormPembahasanFile] = useState<File | null>(null);
+  const [formPembahasanTerbit, setFormPembahasanTerbit] = useState(false);
 
   useEffect(() => {
     fetchDataKelas();
@@ -195,6 +200,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
 
   const handleTambahBab = () => {
     setNewBabJudul('');
+    setNewBabSemester('ganjil');
     setShowAddBabModal(true);
   };
 
@@ -204,7 +210,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       await supabase.from('bab').insert({
         kelas_id: realKelasId,
         nomor: babs.length + 1,
-        judul: newBabJudul.trim()
+        judul: newBabJudul.trim(),
+        semester: newBabSemester
       });
       fetchDataKelas();
       setShowAddBabModal(false);
@@ -219,6 +226,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
     setFormLinks(['']);
     setFormDeadline('');
     setSoalList([]);
+    setFormPembahasanFile(null);
+    setFormPembahasanTerbit(false);
     setShowModal(true);
   };
 
@@ -231,6 +240,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       setFormJudul(m.judul);
       setFormLinks(m.file_url ? m.file_url.split('\n').filter(Boolean) : ['']);
       setFormDeadline(m.deadline ? m.deadline.slice(0, 16) : '');
+      setFormPembahasanFile(null);
+      setFormPembahasanTerbit(!!m.pembahasan_is_terbit);
       
       if (m.tipe !== 'emateri') {
         const { data: soal } = await supabase.from('soal').select('*').eq('konten_id', materiId);
@@ -375,6 +386,17 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       }
     }
 
+    // Pembahasan tugas/LKPD (opsional)
+    let pembahasanUrl: string | null = null;
+    if (formPembahasanFile) {
+      try {
+        pembahasanUrl = await uploadFile(formPembahasanFile, 'pembahasan');
+      } catch (e: any) {
+        customAlert('Gagal upload pembahasan: ' + (e?.message || e), true);
+        return;
+      }
+    }
+
     let kontenIdToUse = editModeId;
 
     if (editModeId) {
@@ -382,7 +404,9 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
         tipe: formTipe,
         judul: formJudul,
         file_url: fileUrl,
-        deadline: formDeadline ? new Date(formDeadline).toISOString() : null
+        deadline: formDeadline ? new Date(formDeadline).toISOString() : null,
+        pembahasan_is_terbit: formPembahasanTerbit,
+        ...(pembahasanUrl ? { pembahasan_file_url: pembahasanUrl } : {})
       }).eq('id', editModeId);
 
       if (errKonten) {
@@ -395,7 +419,9 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
         tipe: formTipe,
         judul: formJudul,
         file_url: fileUrl,
-        deadline: formDeadline ? new Date(formDeadline).toISOString() : null
+        deadline: formDeadline ? new Date(formDeadline).toISOString() : null,
+        pembahasan_file_url: pembahasanUrl,
+        pembahasan_is_terbit: formPembahasanTerbit
       }).select().single();
 
       if (errKonten || !newKonten) {
@@ -512,7 +538,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
               <div className="d-flex justify-between align-center mb-3">
                 <h3 className="text-primary">
                   <span className="badge badge-info mr-2">{index + 1}</span>
-                  {bab.judul}
+                  {judulBab(null, bab.judul)}
                 </h3>
                 <div className="d-flex gap-2">
                   <button onClick={() => bukaModalTambah(bab.id)} className="btn btn-sm btn-outline">+ Tambah Modul/Kuis</button>
@@ -587,7 +613,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
             <label>Pilih Bab</label>
             <select className="form-control" value={forumBabId} onChange={e => setForumBabId(e.target.value)}>
               <option value="">-- Pilih Bab --</option>
-              {babs.map((b: any) => <option key={b.id} value={b.id}>{b.nomor}. {b.judul}</option>)}
+              {babs.map((b: any) => <option key={b.id} value={b.id}>{judulBab(b.nomor, b.judul)}</option>)}
             </select>
           </div>
           {forumBabId && (
@@ -679,6 +705,17 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                   <div className="form-group">
                     <label>Deadline (Tanggal & Jam)</label>
                     <input type="datetime-local" className="form-control" value={formDeadline} onChange={e => setFormDeadline(e.target.value)} />
+                  </div>
+                )}
+
+                {formTipe !== 'emateri' && (
+                  <div className="form-group">
+                    <label>Pembahasan (opsional) — pdf/doc/gambar, maks 2MB</label>
+                    <input type="file" className="form-control" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={e => setFormPembahasanFile(e.target.files?.[0] || null)} />
+                    <label className="d-flex align-center gap-2 mt-2" style={{ cursor: 'pointer' }}>
+                      <input type="checkbox" checked={formPembahasanTerbit} onChange={e => setFormPembahasanTerbit(e.target.checked)} style={{ transform: 'scale(1.2)' }} />
+                      <span className="text-sm">Terbitkan pembahasan (tampil ke siswa)</span>
+                    </label>
                   </div>
                 )}
 
@@ -890,8 +927,8 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
               <form onSubmit={executeTambahBab}>
                 <div className="form-group">
                   <label>Judul Bab</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-control"
                     value={newBabJudul}
                     onChange={(e) => setNewBabJudul(e.target.value)}
@@ -899,6 +936,17 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
                     autoFocus
                     required
                   />
+                </div>
+                <div className="form-group">
+                  <label>Semester</label>
+                  <select
+                    className="form-control"
+                    value={newBabSemester}
+                    onChange={(e) => setNewBabSemester(e.target.value as 'ganjil' | 'genap')}
+                  >
+                    <option value="ganjil">Ganjil</option>
+                    <option value="genap">Genap</option>
+                  </select>
                 </div>
                 <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
                   <button type="button" className="btn btn-outline" onClick={() => setShowAddBabModal(false)}>Batal</button>

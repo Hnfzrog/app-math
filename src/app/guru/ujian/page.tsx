@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { judulBab } from '@/lib/judulBab';
 import {
   badgeStatusUjian,
   formatJadwal,
@@ -309,7 +310,7 @@ export default function GuruUjian() {
                     >
                       <option value="">Pilih bab...</option>
                       {babList.map(b => (
-                        <option key={b.id} value={b.id}>Bab {b.nomor}: {b.judul}</option>
+                        <option key={b.id} value={b.id}>{judulBab(b.nomor, b.judul)}</option>
                       ))}
                     </select>
                     {babList.length === 0 && formData.kelas_id && (

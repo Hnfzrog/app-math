@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { customAlert } from '@/lib/customAlert';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { judulBab } from '@/lib/judulBab';
 
 // Hitung tahun ajaran otomatis berdasarkan bulan sekarang
 function getTahunAjaran() {
@@ -21,6 +22,7 @@ export default function SiswaKelas() {
   const [babs, setBabs] = useState<any[]>([]);
   const [cariBab, setCariBab] = useState('');
   const [teman, setTeman] = useState<any[]>([]);
+  const [tugasPending, setTugasPending] = useState<{ id: string; judul: string; judulBab: string }[]>([]);
   
   // State Forum
   const [activeForum, setActiveForum] = useState<string | null>(null);
@@ -85,6 +87,36 @@ export default function SiswaKelas() {
     // Bab
     const { data: babData } = await supabase.from('bab').select('*, konten(count)').eq('kelas_id', kelasId).order('nomor');
     setBabs(babData || []);
+
+    // Pengingat: tugas/kuis (LKPD/bank soal/evaluasi) yang BELUM dikerjakan siswa.
+    const babIds = (babData || []).map((b) => b.id);
+    if (babIds.length > 0) {
+      const { data: konten } = await supabase
+        .from('konten')
+        .select('id, judul, tipe, bab_id')
+        .in('bab_id', babIds)
+        .in('tipe', ['lkpd', 'banksoal', 'evaluasi']);
+      const kontenList = konten || [];
+      if (kontenList.length > 0) {
+        const { data: soals } = await supabase.from('soal').select('id, konten_id').in('konten_id', kontenList.map((k) => k.id));
+        const soalIds = (soals || []).map((s) => s.id);
+        const answered = new Set<string>();
+        if (soalIds.length > 0) {
+          const { data: jw } = await supabase.from('jawaban_siswa').select('soal_id').eq('siswa_id', SISWA_ID).in('soal_id', soalIds);
+          (jw || []).forEach((j) => answered.add(j.soal_id));
+        }
+        const doneKonten = new Set<string>();
+        (soals || []).forEach((s) => { if (answered.has(s.id)) doneKonten.add(s.konten_id); });
+        setTugasPending(
+          kontenList
+            .filter((k) => !doneKonten.has(k.id))
+            .map((k) => {
+              const bab = (babData || []).find((b) => b.id === k.bab_id);
+              return { id: k.id, judul: k.judul, judulBab: bab ? judulBab(bab.nomor, bab.judul) : '' };
+            })
+        );
+      }
+    }
 
     // Teman sekelas
     const { data: temanData } = await supabase
@@ -243,6 +275,23 @@ export default function SiswaKelas() {
         </div>
       </div>
 
+      {tugasPending.length > 0 && (
+        <div className="card card-body mb-4" style={{ borderLeft: '4px solid var(--warning)' }}>
+          <h3 className="mb-3" style={{ fontSize: '16px' }}>📌 Tugas/Kuis Perlu Dikerjakan ({tugasPending.length})</h3>
+          <ul className="notif-list">
+            {tugasPending.map((t) => (
+              <li key={t.id} className="notif-item d-flex justify-between align-center">
+                <div>
+                  <strong>{t.judul}</strong>
+                  <div className="text-muted" style={{ fontSize: '12px' }}>{t.judulBab}</div>
+                </div>
+                <Link href="/siswa/tugas" className="btn btn-sm btn-primary">Kerjakan</Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="grid-2">
         {/* Daftar Bab / Kurikulum */}
         <div className="card">
@@ -264,7 +313,7 @@ export default function SiswaKelas() {
                   .map(bab => (
                   <li key={bab.id} className="notif-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong>Bab {bab.nomor}: {bab.judul}</strong>
+                      <strong>{judulBab(bab.nomor, bab.judul)}</strong>
                       <div className="d-flex gap-2">
                         <Link href="/siswa/materi" className="btn btn-sm btn-outline">Materi</Link>
                         <button 

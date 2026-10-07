@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { fileUrl } from '@/lib/uploadClient';
+import { judulBab } from '@/lib/judulBab';
 
 function youtubeId(url: string): string | null {
   const m = url.match(/(?:v=|youtu\.be\/|\/embed\/)([A-Za-z0-9_-]{11})/);
@@ -67,6 +68,7 @@ function MateriItem({ url, index }: { url: string; index: number }) {
 export default function SiswaMateri() {
   const [babs, setBabs] = useState<any[]>([]);
   const [materi, setMateri] = useState<Record<string, any[]>>({});
+  const [doneKonten, setDoneKonten] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const { userId: SISWA_ID, loading: userLoading } = useCurrentUser();
@@ -104,6 +106,20 @@ export default function SiswaMateri() {
           });
         }
         setMateri(materiMap);
+
+        // Tandai konten tugas/LKPD yang SUDAH dikerjakan (ada jawaban_siswa minimal 1 soal).
+        const kontenIds = (dataKonten || []).map((k) => k.id);
+        if (kontenIds.length > 0) {
+          const { data: soals } = await supabase.from('soal').select('id, konten_id').in('konten_id', kontenIds);
+          const soalIds = (soals || []).map((s) => s.id);
+          if (soalIds.length > 0) {
+            const { data: jw } = await supabase.from('jawaban_siswa').select('soal_id').eq('siswa_id', SISWA_ID).in('soal_id', soalIds);
+            const answered = new Set((jw || []).map((j) => j.soal_id));
+            const done = new Set<string>();
+            (soals || []).forEach((s) => { if (answered.has(s.id)) done.add(s.konten_id); });
+            setDoneKonten(done);
+          }
+        }
       }
     }
     setLoading(false);
@@ -122,7 +138,7 @@ export default function SiswaMateri() {
         <div className="d-flex flex-column gap-4 mt-3">
           {babs.map(bab => (
             <div key={bab.id} className="card card-body">
-              <span className="badge badge-primary mb-3" style={{ alignSelf: 'flex-start' }}>Bab {bab.nomor}: {bab.judul}</span>
+              <span className="badge badge-primary mb-3" style={{ alignSelf: 'flex-start' }}>{judulBab(bab.nomor, bab.judul)}</span>
 
               {(!materi[bab.id] || materi[bab.id].length === 0) ? (
                 <p className="text-muted">Belum ada konten di bab ini.</p>
@@ -135,7 +151,9 @@ export default function SiswaMateri() {
                         <div className="d-flex justify-between align-center mb-1">
                           <strong>{m.tipe === 'emateri' ? '📄' : (m.tipe === 'lkpd' ? '📝' : '📚')} {m.judul}</strong>
                           {m.tipe !== 'emateri' && (
-                            <Link href="/siswa/tugas" className="btn btn-sm btn-outline">Kerjakan di Tugas</Link>
+                            doneKonten.has(m.id)
+                              ? <span className="badge badge-success">✓ Sudah dikerjakan</span>
+                              : <Link href="/siswa/tugas" className="btn btn-sm btn-outline">Kerjakan di Tugas</Link>
                           )}
                         </div>
 
