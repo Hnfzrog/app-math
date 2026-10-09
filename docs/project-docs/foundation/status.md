@@ -115,3 +115,29 @@ Sumber: spec `prd.md` → "Rapor (cetak & perangkingan) — 7 Okt 2026"; schema 
 ## Provider AI — pindah ke Groq (7 Okt 2026)
 
 Gemini kena limit free tier → provider koreksi esai kini **swappable** (`AI_PROVIDER`, default **Groq** `openai/gpt-oss-120b`; Gemini alternatif). `src/lib/aiScore.ts` di-refactor jadi adapter per-provider + `aiScore.test.ts`. Model Llama Groq sudah deprecated (shutdown 16 Agu 2026) sehingga default memakai `openai/gpt-oss-120b`. Docs (README, INSTALASI, panduan HTML, database.md, prd.md) disinkronkan.
+
+## Perbaikan Responsive Lintas Role — 9 Okt 2026
+
+Sumber: permintaan user ("semua role belum support responsive"). Aturan tata letak & breakpoint kini di `development/ui-ux.md` (baru).
+
+**Akar masalah**: halaman role memakai inline `style` untuk tata letak (`display`, `grid-template-columns`, `width`) — inline style mengalahkan media query di `globals.css`. Ditambah satu bug shell: `.main-content-wrapper` (flex item) tanpa `min-width: 0`, sehingga tabel lebar di dalam `.table-responsive` melebarkan **seluruh** halaman dan topbar.
+
+### Batch
+- S1: `globals.css` — utility yang hilang (`.w-100`, `.h-max`, `.mb-0`, `.my-3/.my-4`, `.p-3/.p-4`, `.text-sm`, `.text-right/.text-left`, `.text-primary`, `.bg-light`, `.rounded`, `.flex-1-min`), kelas baru (`.stats-grid-2`, `.toolbar-row`, `.tabs-row`, `.topbar-user-row`, `.notif-permission-banner`), `min-width: 0` pada `.main-content-wrapper`, grid `minmax(0, 1fr)`, breadcrumb disembunyikan ≤992px, breakpoint 480px & 1400px.
+- S2: `LmsLayout` — `.topbar-user-info` (inline `display` mengalahkan `display:none` ≤640px), banner izin notifikasi, dropdown notifikasi, nama sekolah di sidebar.
+- S3: Halaman — grid inline → kelas (7 file), baris toolbar/tab → `.toolbar-row`/`.tabs-row` (4 file), tabel bersarang di modal presensi guru → `.table-responsive`, baris input modal rapor → membungkus.
+
+### Progress
+- [x] S1–S3 diterapkan; perbaikan terverifikasi tanpa gulir horizontal di 375px & 768px (lihat di bawah)
+- [x] Dokumen `development/ui-ux.md` dibuat (token, breakpoint, aturan inline style, checklist)
+
+### Verifikasi (9 Okt 2026)
+
+Node 20 (`nvm use 20`; `node` di PATH default masih v14 — lihat `development/testing.md`):
+
+- `npm run build` — hijau (semua rute terkompilasi).
+- `npm test` — 72/72 lolos (7 file).
+- `npm run lint` — tidak ada error baru; 264 error lama (`no-explicit-any`, `<img>`, react-hooks) sudah ada sebelumnya di berkas lain, di luar perubahan ini.
+- Cek viewport via Playwright (config sementara tanpa globalSetup, jadi **tidak menulis** data uji): **31/31 halaman × 375px & 768px bebas gulir horizontal** (login, root, 9 admin, 9 guru, 9 siswa, 2 halaman ujian siswa) + markup ujian sintetis + modal presensi manual & modal Isi Deskripsi rapor. Berkas verifikasi sementara sudah dihapus.
+
+**Limitasi**: langkah ujian *di dalam* soal (setelah Pakta Integritas) tidak dijalankan karena akan membuat percobaan ujian nyata di Supabase — layout-nya diverifikasi lewat markup sintetis dengan kelas yang sama. Tidak ada visual-regression test di repo.

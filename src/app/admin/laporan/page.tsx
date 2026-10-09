@@ -76,13 +76,13 @@ function AdminLaporanInner() {
 
   return (
     <div className="card card-body">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div className="toolbar-row" style={{ marginBottom: '20px' }}>
         <div>
           <h3 style={{ margin: 0 }}>Helpdesk / Laporan Kendala</h3>
           <p className="text-muted" style={{ margin: '5px 0 0' }}>Pantau dan selesaikan kendala yang dilaporkan oleh Siswa dan Guru.</p>
         </div>
-        
-        <div style={{ display: 'flex', gap: '15px' }}>
+
+        <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
           <select 
             className="form-control" 
             value={roleFilter} 

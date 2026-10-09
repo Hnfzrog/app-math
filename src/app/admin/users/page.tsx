@@ -251,7 +251,7 @@ export default function AdminUsers() {
         <h3 className="mb-3">Daftar Populasi (Kelola User)</h3>
         
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>
+        <div className="tabs-row">
           {['siswa', 'guru', 'admin'].map(t => (
             <button
               key={t}
@@ -269,8 +269,8 @@ export default function AdminUsers() {
         </div>
 
         {/* Toolbar (Filters & Actions) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '10px' }}>
+        <div className="toolbar-row" style={{ marginTop: '20px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             {activeTab !== 'admin' && (
               <select className="form-control" style={{ width: 'auto' }} value={filterTahun} onChange={e => setFilterTahun(e.target.value)}>
                 <option value="">Semua Tahun Ajaran</option>
@@ -286,7 +286,7 @@ export default function AdminUsers() {
             )}
           </div>
           
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={printPdf}>
               📄 Download / Print PDF
             </button>

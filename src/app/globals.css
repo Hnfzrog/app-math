@@ -110,7 +110,30 @@ input, select, textarea {
 .text-danger { color: var(--danger); }
 .text-success { color: var(--success); }
 .text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-left { text-align: left; }
+.text-primary { color: var(--primary); }
+.text-sm { font-size: 12px; }
+.text-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-bold { font-weight: 700; }
+
+/* Utility lanjutan — dipakai di JSX (sebelumnya tidak terdefinisi sehingga
+   tidak berefek, mis. tombol yang dimaksudkan selebar penuh di layar kecil). */
+.w-100 { width: 100%; }
+.h-max { height: max-content; }
+.d-block { display: block; }
+.flex-wrap { flex-wrap: wrap; }
+.min-w-0 { min-width: 0; }
+.mb-0 { margin-bottom: 0; }
+.my-3 { margin-block: 1rem; }
+.my-4 { margin-block: 1.5rem; }
+.p-3 { padding: 1rem; }
+.p-4 { padding: 1.5rem; }
+.bg-light { background: var(--slate-100); }
+.rounded { border-radius: var(--radius-md); }
+/* Beberapa input `.form-control` (width:100%) dipakai berdampingan dalam satu
+   baris flex — di layar kecil baris itu harus bisa membungkus dengan rapi. */
+.flex-1-min { flex: 1 1 120px; min-width: 0; }
 
 /* Buttons */
 .btn {
@@ -344,6 +367,12 @@ textarea:disabled {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .sidebar-brand svg { color: var(--primary); }
+/* Nama sekolah bisa panjang → jangan sampai mendorong lebar sidebar. */
+.sidebar-brand span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .sidebar-user {
   padding: 1.25rem 1.5rem;
@@ -451,6 +480,11 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
 .main-content-wrapper {
   margin-left: 260px;
   flex: 1;
+  /* PENTING: `min-width: 0` — tanpa ini, flex item tidak boleh menyusut di
+     bawah lebar min-content isinya, sehingga tabel lebar di dalam
+     `.table-responsive` melebarkan seluruh shell (dan membuat topbar serta
+     halaman menggulir horizontal di layar kecil). */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -501,6 +535,18 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
   font-size: 13px;
   font-weight: 700;
   color: var(--slate-800);
+}
+/* Varian "chip" (avatar + nama + badge role) di topbar. Sengaja hanya aktif di
+   ≥641px supaya rule `display: none` untuk `.topbar-user-info` di ≤640px benar-
+   benar berlaku — sebelumnya inline `display: flex` di JSX selalu menang,
+   sehingga chip user tidak pernah hilang di HP dan topbar meluber. */
+@media (min-width: 641px) {
+  .topbar-user-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
 }
 
 /* NOTIFICATIONS DROPDOWN */
@@ -615,15 +661,41 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
 .stat-info .value { font-size: 20px; font-weight: 800; color: var(--dark); }
 
 /* GRID LAYOUTS */
+/* minmax(0, 1fr) — bukan `1fr` — agar isi panjang (email/URL/nama) tidak
+   memaksa kolom melebar melebihi kontainer. */
 .grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
 }
 .grid-3 {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.5rem;
+}
+/* Grid statistik yang memang ingin 2 kolom di layar besar, tapi tetap
+   runtuh ke 1 kolom di HP (pengganti inline `repeat(2, 1fr)`). */
+.stats-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+/* Baris toolbar (judul/filter + tombol) dan baris tab — selalu membungkus
+   agar tidak memaksa halaman menggulir horizontal di layar kecil. */
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.tabs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--slate-200);
+  padding-bottom: 0.5rem;
 }
 
 /* TABLES */
@@ -986,6 +1058,24 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* Banner izin notifikasi browser (semua role). Dulu inline di LmsLayout dengan
+   `left: 24px` + `maxWidth: 340px` → melebihi lebar layar HP dan menabrak
+   tombol float Helpdesk. */
+.notif-permission-banner {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 1000;
+  background: var(--white);
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: min(340px, 100%);
+}
+
 /* RPP VISUAL WORKFLOW CHART */
 .rpp-flow {
   display: flex;
@@ -1019,6 +1109,8 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
 /* ================= 6. RESPONSIVE BREAKPOINTS ================= */
 @media (max-width: 992px) {
   .sidebar {
+    /* Lebar dibatasi agar drawer tidak menutupi seluruh layar HP. */
+    width: min(280px, 85vw);
     transform: translateX(-100%);
     box-shadow: var(--shadow-lg);
   }
@@ -1045,6 +1137,11 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
   .topbar {
     padding: 0 1rem;
   }
+  /* Breadcrumb "Sekolah / role / halaman" memakan ruang di layar sempit;
+     judul halaman saja sudah cukup. */
+  .breadcrumb {
+    display: none;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1067,6 +1164,49 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
   }
   .topbar-user-info {
     display: none;
+  }
+  /* Topbar: tinggi kaku 65px + isi yang lebih besar membuat baris meluber.
+     Pakai min-height supaya isi bisa turun tanpa memotong konten. */
+  .topbar {
+    min-height: 65px;
+    height: auto;
+    padding-block: 0.5rem;
+  }
+  .topbar-left {
+    min-width: 0;
+  }
+  /* Grid statistik 2 kolom versi kelas (pengganti inline repeat(2,1fr)). */
+  .stats-grid-2 {
+    grid-template-columns: 1fr;
+  }
+  /* Baris toolbar & tab: tiap item melebar mengikuti ruang yang ada. */
+  .toolbar-row > *,
+  .tabs-row > * {
+    flex: 1 1 auto;
+  }
+  /* Header "judul kiri + aksi kanan" di banyak halaman memakai
+     .d-flex .justify-between tanpa wrap → izinkan membungkus di HP. */
+  .d-flex.justify-between {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  /* Header halaman ujian (sticky) berisi judul + badge timer besar. */
+  .exam-page-header {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  /* Banner izin notifikasi: penuhi lebar layar (bukan 340px kaku). */
+  .notif-permission-banner {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+    flex-wrap: wrap;
+  }
+  /* Guru & siswa punya tombol float Helpdesk di kanan bawah → naikkan banner
+     agar keduanya tidak bertumpuk. */
+  [data-role="guru"] .notif-permission-banner,
+  [data-role="siswa"] .notif-permission-banner {
+    bottom: 88px;
   }
   .stats-grid {
     grid-template-columns: 1fr;
@@ -1109,5 +1249,36 @@ body.exam-mode .main-content-wrapper { margin-left: 0; }
   }
   .toast {
     width: 100%;
+  }
+}
+
+/* Layar sangat lebar: batasi lebar konten agar baris teks/tabel tidak
+   membentang terlalu jauh (desktop monitor lebar). */
+@media (min-width: 1400px) {
+  .main-body {
+    max-width: 1400px;
+    margin-inline: auto;
+    width: 100%;
+  }
+}
+
+/* HP kecil (≤480px): rapatkan padding & buat tombol toolbar selebar penuh
+   agar target sentuh nyaman dan tidak ada yang terjepit. */
+@media (max-width: 480px) {
+  .main-body {
+    padding: 1rem 0.75rem;
+  }
+  .topbar {
+    padding: 0.5rem 0.75rem;
+  }
+  .card-body {
+    padding: 1rem;
+  }
+  .toolbar-row > *,
+  .tabs-row > * {
+    flex: 1 1 100%;
+  }
+  .stat-card {
+    padding: 0.9rem;
   }
 }

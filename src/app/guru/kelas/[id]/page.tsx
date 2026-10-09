@@ -506,7 +506,7 @@ export default function GuruKelasDetail({ params }: { params: Promise<{ id: stri
       </div>
       
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #ddd', paddingBottom: '10px', marginBottom: '20px' }}>
+      <div className="tabs-row" style={{ marginBottom: '20px' }}>
         <button
           className={`btn ${activeTab === 'materi' ? 'btn-primary' : 'btn-outline'}`}
           onClick={() => setActiveTab('materi')}

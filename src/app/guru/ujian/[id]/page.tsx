@@ -377,7 +377,7 @@ export default function GuruUjianDetail({ params }: { params: Promise<{ id: stri
           <Link href="/guru/ujian" className="btn btn-outline" style={{ padding: '0.5rem' }}>←</Link>
           <h2 style={{ margin: 0 }}>Kelola Soal Ujian</h2>
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2" style={{ flexWrap: 'wrap' }}>
           <Link href={`/guru/ujian/${ujianId}/hasil`} className="btn btn-outline">Hasil Ujian</Link>
           <button onClick={bukaModalImport} className="btn btn-outline">⤓ Ambil Soal dari Ujian Lain</button>
           <button onClick={bukaModalTambah} className="btn btn-primary">+ Tambah Soal</button>

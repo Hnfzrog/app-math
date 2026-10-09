@@ -209,7 +209,7 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
   };
 
   return (
-    <div className="dashboard-shell">
+    <div className="dashboard-shell" data-role={role}>
       <GpsGate />
       {/* SIDEBAR */}
       <aside className={`sidebar ${sidebarOpen ? 'show' : ''}`}>
@@ -289,7 +289,7 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
             </div>
           </div>
 
-          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '1rem', minWidth: 0 }}>
             <div className="notification-wrapper" style={{ position: 'relative' }}>
               <button 
                 className="btn-icon" 
@@ -311,8 +311,9 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
               </button>
               {showNotifDropdown && (
                 <div style={{
-                  position: 'absolute', top: '40px', right: '0', background: 'white', 
-                  border: '1px solid #ddd', borderRadius: '8px', width: '250px', 
+                  position: 'absolute', top: '40px', right: '0', background: 'white',
+                  border: '1px solid #ddd', borderRadius: '8px',
+                  width: 'min(280px, calc(100vw - 32px))',
                   boxShadow: '0 4px 6px rgba(0,0,0,0.1)', zIndex: 100
                 }}>
                   <div style={{ padding: '10px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>Notifikasi</div>
@@ -333,7 +334,10 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
               )}
             </div>
 
-            <div className="topbar-user-info" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+            {/* Baris (bukan kolom) tanpa inline `display` — lihat `.topbar-user-row`
+                di globals.css: hanya aktif ≥641px agar `.topbar-user-info`
+                bisa disembunyikan di HP. */}
+            <div className="topbar-user-info topbar-user-row">
               {fotoProfil ? (
                 <img
                   src={fileUrl(fotoProfil)!}
@@ -359,13 +363,12 @@ export default function LmsLayout({ children, role, userName: userNameProp = "Pe
         </main>
       </div>
 
-      {/* Banner izin notifikasi (muncul bila belum diputuskan) */}
+      {/* Banner izin notifikasi (muncul bila belum diputuskan).
+          Tata letak ada di `.notif-permission-banner` (globals.css) supaya bisa
+          menyesuaikan diri di HP — sebelumnya `left:24px` + `maxWidth:340px`
+          membuatnya melebihi lebar layar dan menabrak tombol float Helpdesk. */}
       {izinNotif === 'default' && (
-        <div style={{
-          position: 'fixed', bottom: '24px', left: '24px', zIndex: 1000, background: '#fff',
-          padding: '12px 16px', borderRadius: '10px', boxShadow: '0 4px 14px rgba(0,0,0,0.15)',
-          display: 'flex', gap: '10px', alignItems: 'center', maxWidth: '340px',
-        }}>
+        <div className="notif-permission-banner">
           <span style={{ fontSize: '13px' }}>Aktifkan notifikasi browser untuk info tugas, ujian, &amp; pengumuman.</span>
           <button
             type="button"

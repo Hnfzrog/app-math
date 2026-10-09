@@ -165,7 +165,7 @@ export default function SiswaDashboard() {
     <div>
       {/* Profile Card */}
       {profilSiswa && (
-        <div className="card card-body mb-4" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div className="card card-body mb-4" style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <div style={{
             width: '60px', height: '60px', borderRadius: '50%',
             background: 'var(--primary)', color: '#fff',
@@ -192,7 +192,7 @@ export default function SiswaDashboard() {
         <div className="d-flex flex-column gap-4">
           {/* Persebaran: Materi / LKPD / Tugas / Ujian */}
           {/* Kartu dapat diklik → langsung ke halaman terkait (revisi A1). */}
-          <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <div className="stats-grid stats-grid-2">
             <Link href="/siswa/materi" className="stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="stat-icon bg-blue">📚</div>
               <div className="stat-info">
@@ -276,7 +276,7 @@ export default function SiswaDashboard() {
               ) : (
                 <ul className="notif-list">
                   {materiTerbaru.map(m => (
-                    <li key={m.id} className="notif-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <li key={m.id} className="notif-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: '6px' }}>
                       <div>
                         <strong>{m.judul}</strong>
                         <div className="text-muted" style={{ fontSize: '12px' }}>{(m.bab as any)?.judul || ''}</div>

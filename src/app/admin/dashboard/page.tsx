@@ -57,7 +57,7 @@ export default function AdminDashboard() {
         </div>
       </div>
       
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px', marginTop: '20px' }}>
+      <div className="grid-2" style={{ marginTop: '20px' }}>
         {/* Shortcut Section */}
         <div className="card card-body">
           <h3 className="mb-3">Shortcut Laporan</h3>

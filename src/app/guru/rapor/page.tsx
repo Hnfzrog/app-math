@@ -448,10 +448,10 @@ export default function GuruRapor() {
               <div className="form-group">
                 <label>Kegiatan Pengembangan Diri</label>
                 {kpdList.map((k, i) => (
-                  <div key={i} className="d-flex gap-2 mb-2">
-                    <input className="form-control" placeholder="Kegiatan" value={k.kegiatan}
+                  <div key={i} className="d-flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
+                    <input className="form-control flex-1-min" placeholder="Kegiatan" value={k.kegiatan}
                       onChange={(e) => setKpdList((p) => p.map((x, j) => j === i ? { ...x, kegiatan: e.target.value } : x))} />
-                    <input className="form-control" placeholder="Deskripsi" value={k.deskripsi}
+                    <input className="form-control flex-1-min" placeholder="Deskripsi" value={k.deskripsi}
                       onChange={(e) => setKpdList((p) => p.map((x, j) => j === i ? { ...x, deskripsi: e.target.value } : x))} />
                     <button type="button" className="btn btn-sm btn-outline" onClick={() => setKpdList((p) => p.filter((_, j) => j !== i))}>✕</button>
                   </div>
@@ -462,8 +462,8 @@ export default function GuruRapor() {
               <div className="form-group">
                 <label>Akhlak Mulia & Kepribadian</label>
                 {akhlakList.map((a, i) => (
-                  <div key={i} className="d-flex gap-2 mb-2">
-                    <input className="form-control" placeholder="Deskripsi" value={a.deskripsi}
+                  <div key={i} className="d-flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
+                    <input className="form-control flex-1-min" placeholder="Deskripsi" value={a.deskripsi}
                       onChange={(e) => setAkhlakList((p) => p.map((x, j) => j === i ? { deskripsi: e.target.value } : x))} />
                     <button type="button" className="btn btn-sm btn-outline" onClick={() => setAkhlakList((p) => p.filter((_, j) => j !== i))}>✕</button>
                   </div>

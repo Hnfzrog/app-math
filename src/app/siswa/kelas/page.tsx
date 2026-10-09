@@ -237,7 +237,7 @@ export default function SiswaKelas() {
     <div>
       {/* Info Kelas Card */}
       <div className="card card-body mb-4">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
           <div style={{
             width: '56px', height: '56px', borderRadius: 'var(--radius-md)',
             background: 'var(--primary-light)', color: 'var(--primary)',
@@ -251,7 +251,7 @@ export default function SiswaKelas() {
 
         <hr style={{ borderColor: 'var(--slate-200)', margin: '0 0 16px' }} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div className="grid-2" style={{ gap: '12px' }}>
           <div>
             <span className="text-muted" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>Tingkat Kelas</span>
             <p style={{ margin: '4px 0 0', fontWeight: 700 }}>Kelas {kelasInfo.nama} SMP</p>
@@ -312,7 +312,7 @@ export default function SiswaKelas() {
                   .filter(b => b.judul.toLowerCase().includes(cariBab.toLowerCase()) || `bab ${b.nomor}`.toLowerCase().includes(cariBab.toLowerCase()))
                   .map(bab => (
                   <li key={bab.id} className="notif-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: '6px' }}>
                       <strong>{judulBab(bab.nomor, bab.judul)}</strong>
                       <div className="d-flex gap-2">
                         <Link href="/siswa/materi" className="btn btn-sm btn-outline">Materi</Link>

@@ -441,7 +441,7 @@ export default function GuruUjianHasil({ params }: { params: Promise<{ id: strin
                         </span>
                       </p>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div className="grid-2" style={{ gap: '14px' }}>
                         {/* KIRI — jawaban siswa */}
                         <div>
                           <p style={{ whiteSpace: 'pre-wrap' }}>{soal.pertanyaan}</p>

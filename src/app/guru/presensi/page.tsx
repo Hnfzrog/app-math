@@ -499,6 +499,9 @@ export default function GuruPresensi() {
                       Siswa yang sudah presensi hari ini dikunci agar tidak tercatat dua kali.
                     </p>
                     <div style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--slate-200)', borderRadius: 'var(--radius-md)' }}>
+                      {/* table-responsive: kolom Status punya lebar tetap (190px) →
+                          di HP tabel harus bisa di-scroll horizontal, bukan meluber. */}
+                      <div className="table-responsive">
                       <table className="table" style={{ margin: 0 }}>
                         <thead>
                           <tr>
@@ -532,6 +535,7 @@ export default function GuruPresensi() {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </div>
                 )

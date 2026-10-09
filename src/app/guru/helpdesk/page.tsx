@@ -62,7 +62,7 @@ export default function GuruHelpdesk() {
         <p className="text-muted" style={{ margin: '4px 0 0' }}>Laporkan kendala aplikasi kepada Admin.</p>
       </div>
 
-      <div className="grid-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
+      <div className="grid-2">
         <div className="card card-body h-max">
           <h3 className="mb-3">Buat Laporan Baru</h3>
           <div className="form-group">

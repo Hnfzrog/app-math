@@ -73,7 +73,7 @@ export default function GuruDashboard() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', rowGap: '8px' }}>
         <div>
           <h2 style={{ margin: 0 }}>Halo, {namaGuru || 'Guru'}! 👋</h2>
           <p className="text-muted" style={{ margin: '4px 0 0' }}>Selamat datang di Dashboard Guru.</p>
@@ -151,7 +151,7 @@ export default function GuruDashboard() {
 
           <div className="card card-body">
             <h3 className="mb-3">🚀 Akses Cepat</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div className="grid-2" style={{ gap: '10px' }}>
               <Link href="/guru/kelas" className="btn btn-outline" style={{ textAlign: 'center' }}>👥 Kelola Kelas</Link>
               <Link href="/guru/ujian" className="btn btn-outline" style={{ textAlign: 'center' }}>📝 Manajemen Ujian</Link>
               <Link href="/guru/penilaian" className="btn btn-outline" style={{ textAlign: 'center' }}>✍️ Penilaian</Link>

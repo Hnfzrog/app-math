@@ -253,12 +253,12 @@ export default function AdminJadwal() {
   return (
     <div>
       <div className="card card-body mb-4">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="toolbar-row">
           <div>
             <h3 className="mb-2">Management Jadwal</h3>
             <p className="text-muted m-0">Atur jadwal guru mengajar agar tidak bentrok.</p>
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={handleExportPDF}>📄 Download / Print PDF</button>
             <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
               {generating ? 'Memproses...' : '✨ Generate Otomatis'}
